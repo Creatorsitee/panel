@@ -117,7 +117,7 @@ async function prepareRequestData(
     method: "post",
     url: `http://${node.address}:${node.port}/instances/create`,
     auth: {
-      username: "Skyport",
+      username: "OJIHOST",
       password: node.apiKey,
     },
     headers: {

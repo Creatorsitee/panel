@@ -1,18 +1,18 @@
 /*
- *           __                          __
- *      _____/ /____  ______  ____  _____/ /_
- *    / ___/ //_/ / / / __ \/ __ \/ ___/ __/
- *   (__  ) ,< / /_/ / /_/ / /_/ / /  / /_
- *  /____/_/|_|\__, / .___/\____/_/   \__/
- *           /____/_/
+ *    ____       _ _ _   _  ___  ____ _____
+ *   / __ \     | (_) | | |/ _ \/ ___|_   _|
+ *  | |  | |    | | | |_| | | | \___ \ | |
+ *  | |  | |_   | | |  _  | |_| |___) || |
+ *  | |__| | |__| |_| |_| |\___/|____/ |_|
+ *   \____/ \____/
  *
- *  Skyport Panel 0.3.0 (Oz)
- *  (c) 2024 Matt James and contributors
+ *  OJIHOST Panel 0.3.0
+ *  (c) 2024 OJIHOST Team
  *
  */
 
 /**
- * @fileoverview Main server file for Skyport Panel. Sets up the express application,
+ * @fileoverview Main server file for OJIHOST Panel. Sets up the express application,
  * configures middleware for sessions, body parsing, and websocket enhancements, and dynamically loads route
  * modules. This file also sets up the server to listen on a configured port and initializes logging.
  */
@@ -249,10 +249,10 @@ console.log(chalk.gray(ascii.replace("{version}", config.version)));
 app.get("*", async function (req, res) {
   res.render("errors/404", {
     req,
-    name: (await db.get("name")) || "Skyport",
+    name: (await db.get("name")) || "OJIHOST",
   });
 });
 
 app.listen(config.port, () =>
-  log.info(`Skyport is listening on port ${config.port}`)
+  log.info(`OJIHOST is listening on port ${config.port}`)
 );

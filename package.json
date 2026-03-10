@@ -1,21 +1,21 @@
 {
-  "name": "skyport",
+  "name": "ojihost",
   "version": "0.3.0",
-  "description": "Skyport is an open source panel for managing and operating game servers and applications built using Node.js with Express and Docker.",
+  "description": "OJIHOST is an open source panel for managing and operating game servers and applications built using Node.js with Express and Docker.",
   "main": "index.js",
   "bin": {
-    "skyport": "./exec/bin/index.js"
+    "ojihost": "./exec/bin/index.js"
   },
   "scripts": {
     "start": "node index.js",
     "start:dev": "nodemon index.js",
     "dev": "concurrently \"npm run start\" \"npm run watch\"",
     "watch": "browser-sync start --config bs-config.js",
-    "seed": "skyport seed",
-    "createUser": "skyport createUser",
+    "seed": "ojihost seed",
+    "createUser": "ojihost createUser",
     "build:css": "npx @tailwindcss/cli -i ./public/tw.conf -o ./public/assets/tailwind.css --watch"
   },
-  "author": "skyport-team",
+  "author": "ojihost-team",
   "license": "MIT",
   "dependencies": {
     "@keyv/sqlite": "^3.6.7",

@@ -106,8 +106,8 @@ router.get("/enable-2fa", isAuthenticated, async (req, res) => {
     );
     const secret = speakeasy.generateSecret({
       length: 20,
-      name: `Skyport (${currentUser.username})`,
-      issuer: "Skyport",
+      name: `OJIHOST (${currentUser.username})`,
+      issuer: "OJIHOST",
     });
 
     const updatedUsers = users.map((user) => {
@@ -125,7 +125,7 @@ router.get("/enable-2fa", isAuthenticated, async (req, res) => {
         req,
         user: req.user,
         users,
-        name: (await db.get("name")) || "Skyport",
+        name: (await db.get("name")) || "OJIHOST",
 
         qrCode: data_url,
       });
