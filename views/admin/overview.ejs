@@ -55,10 +55,10 @@
                       link.classList.add('text-amber-500', 'transition', 'hover:text-amber-600', 'font-medium');
                       link.textContent = '<%= req.translations.here %>';
             
-                      const linkText = document.createTextNode(`<%= req.translations.newReleaseSkyport1 %> ${latestVersion} <%= req.translations.newReleaseSkyport2 %> `);
+                      const linkText = document.createTextNode(`<%= req.translations.newReleaseOjihost1 %> ${latestVersion} <%= req.translations.newReleaseOjihost2 %> `);
                       versionStatusSpan.appendChild(linkText);
                       versionStatusSpan.appendChild(link);
-                      versionStatusSpan.appendChild(document.createTextNode(' <%= req.translations.newReleaseSkyport3 %>'));
+                      versionStatusSpan.appendChild(document.createTextNode(' <%= req.translations.newReleaseOjihost3 %>'));
                       versionStatusSpan.classList.add('text-amber-500', 'pt-2');
                     }
                   })

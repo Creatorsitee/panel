@@ -544,7 +544,7 @@ router.get("/api/v1/images", validateApiKey, async (req, res) => {
  */
 router.get("/api/v1/name", validateApiKey, async (req, res) => {
   try {
-    const name = (await db.get("name")) || "Skyport";
+    const name = (await db.get("name")) || "OJIHOST";
     res.json({ name });
   } catch (error) {
     log.error("Error retrieving name:", error);
@@ -669,7 +669,7 @@ function generateRandomCode(length) {
 async function deleteInstance(instance) {
   try {
     await axios.get(
-      `http://Skyport:${instance.Node.apiKey}@${instance.Node.address}:${instance.Node.port}/instances/${instance.ContainerId}/delete`
+      `http://OJIHOST:${instance.Node.apiKey}@${instance.Node.address}:${instance.Node.port}/instances/${instance.ContainerId}/delete`
     );
 
     // Update user's instances
@@ -721,7 +721,7 @@ async function checkContainerState(
         method: "get",
         url: `http://${nodeAddress}:${nodePort}/state/${volumeId}`,
         auth: {
-          username: "Skyport",
+          username: "OJIHOST",
           password: apiKey,
         },
       });
@@ -800,7 +800,7 @@ async function prepareRequestData(
     method: "post",
     url: `http://${node.address}:${node.port}/instances/create`,
     auth: {
-      username: "Skyport",
+      username: "OJIHOST",
       password: node.apiKey,
     },
     headers: {

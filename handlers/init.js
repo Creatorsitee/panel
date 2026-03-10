@@ -4,10 +4,10 @@ const { v4: uuidv4 } = require("uuid");
 const log = new (require("cat-loggr"))();
 
 async function init() {
-  const skyport = await db.get("skyport_instance");
-  if (!skyport) {
-    log.init("This is probably your first time starting Skyport, welcome!");
-    log.init("You can find documentation for the panel at skyport.dev");
+  const ojihost = await db.get("ojihost_instance");
+  if (!ojihost) {
+    log.init("This is probably your first time starting OJIHOST, welcome!");
+    log.init("Thank you for using OJIHOST Panel!");
 
     const errorMessages = [];
 
@@ -16,7 +16,7 @@ async function init() {
 
     if (!imageCheck) {
       errorMessages.push(
-        "Before starting Skyport for the first time, you didn't run the seed command!"
+        "Before starting OJIHOST for the first time, you didn't run the seed command!"
       );
       errorMessages.push("Please run: npm run seed");
     }
@@ -32,17 +32,17 @@ async function init() {
       process.exit();
     }
 
-    const skyportId = uuidv4();
+    const ojihostId = uuidv4();
     const setupTime = Date.now();
 
     const info = {
-      skyportId: skyportId,
+      ojihostId: ojihostId,
       setupTime: setupTime,
       originalVersion: config.version,
     };
 
-    await db.set("skyport_instance", info);
-    log.info("Initialized Skyport panel with ID: " + skyportId);
+    await db.set("ojihost_instance", info);
+    log.info("Initialized OJIHOST panel with ID: " + ojihostId);
   }
   log.info("Init complete!");
 }

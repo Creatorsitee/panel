@@ -278,7 +278,7 @@ async function executePowerAction(instanceId, powerAction) {
       {},
       {
         auth: {
-          username: "Skyport",
+          username: "OJIHOST",
           password: instance.Node.apiKey,
         },
         headers: {
