@@ -1,68 +1,151 @@
-<!doctype html>
+<!DOCTYPE html>
 <html class="h-full">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= name %></title>
+  <title><%= name %> - Create Account</title>
   <link href="../assets/tailwind.css" rel="stylesheet">
-  <link rel="preconnect" href="https://cdn.fontshare.com">
-  <link href="https://api.fontshare.com/v2/css?f[]=general-sans@500,300,600,400,700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .input-focus:focus {
+      border-color: rgba(34, 211, 238, 0.5);
+      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1);
+    }
+  </style>
 </head>
-<body style="font-family: 'General Sans'" class="bg-[#141414] h-full">
-<div class="min-h-full flex">
-  <div class="flex-1 flex flex-col justify-center py-12 px-4 sm:px-6 lg:flex-none lg:px-20 xl:px-24">
-    <div class="mx-auto w-full max-w-sm lg:w-96">
-      <div>
-        <img class="h-12 w-auto rounded-xl" src="<%= settings.logo %>" alt="">
-        <h2 class="mt-6 text-3xl font-medium text-white">Register an account</h2>
-        <p class="mt-2 text-sm text-neutral-500">
-          Please enter your details below.
-        </p>
-      </div>
+<body style="font-family: 'Inter', sans-serif" class="bg-[#0a0a0a] h-full text-white">
+  <div class="min-h-full flex">
+    <!-- Left Side - Form -->
+    <div class="flex-1 flex flex-col justify-center px-6 py-12 lg:px-20 xl:px-28">
+      <div class="mx-auto w-full max-w-sm">
+        <!-- Logo & Title -->
+        <div class="mb-10">
+          <% if (settings.logo) { %>
+            <img class="h-10 w-auto rounded-xl mb-8" src="<%= settings.logo %>" alt="<%= name %>">
+          <% } else { %>
+            <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center mb-8">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 text-white">
+                <path d="M12.378 1.602a.75.75 0 0 0-.756 0L3 6.632l9 5.25 9-5.25-8.622-5.03ZM21.75 7.93l-9 5.25v9l8.628-5.032a.75.75 0 0 0 .372-.648V7.93ZM11.25 22.18v-9l-9-5.25v8.57a.75.75 0 0 0 .372.648l8.628 5.033Z" />
+              </svg>
+            </div>
+          <% } %>
+          <h1 class="text-2xl font-semibold tracking-tight text-white">Create an account</h1>
+          <p class="mt-2 text-sm text-zinc-500">Get started with your server management</p>
+        </div>
 
-      <div class="mt-8">
+        <!-- Form -->
+        <form method="POST" action="/auth/register" class="space-y-5">
+          <div>
+            <label for="username" class="block text-sm font-medium text-zinc-400 mb-2">Username</label>
+            <input 
+              placeholder="Choose a username" 
+              id="username" 
+              name="username" 
+              autocomplete="username" 
+              required 
+              class="input-focus w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none transition-all duration-200 text-sm">
+          </div>
+
+          <div>
+            <label for="email" class="block text-sm font-medium text-zinc-400 mb-2">Email Address</label>
+            <input 
+              placeholder="you@example.com" 
+              id="email" 
+              name="email" 
+              type="email"
+              autocomplete="email" 
+              required 
+              class="input-focus w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none transition-all duration-200 text-sm">
+          </div>
+
+          <div>
+            <label for="password" class="block text-sm font-medium text-zinc-400 mb-2">Password</label>
+            <input 
+              placeholder="Create a strong password" 
+              id="password" 
+              name="password" 
+              type="password" 
+              autocomplete="new-password" 
+              required 
+              class="input-focus w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none transition-all duration-200 text-sm">
+          </div>
+
+          <button type="submit" class="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white font-medium rounded-xl transition-all duration-200 text-sm shadow-lg shadow-cyan-500/20">
+            Create account
+          </button>
+          
+          <p class="text-center text-sm text-zinc-500">
+            Already have an account? 
+            <a href="/login" class="text-cyan-400 hover:text-cyan-300 transition-colors duration-200 font-medium">Sign in</a>
+          </p>
+        </form>
+
+        <!-- Error Messages -->
         <div class="mt-6">
-          <form method="POST" action="/auth/register" class="space-y-6">
-            <div>
-              <label for="username" class="block text-sm font-medium text-neutral-400"> Username </label>
-              <div class="mt-1">
-                <input placeholder="example" id="username" name="username" autocomplete="username" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
-              </div>
+          <% if (req.query.err && req.query.err == "InvalidCredentials") { %>
+            <div class="flex items-center gap-2 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-red-400 shrink-0">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+              </svg>
+              <span class="text-sm text-red-400">Invalid details. Please try again.</span>
             </div>
-
-            <div>
-              <label for="email" class="block text-sm font-medium text-neutral-400"> Email </label>
-              <div class="mt-1">
-                <input placeholder="example@domain.com" id="email" name="email" autocomplete="email" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
-              </div>
-            </div>
-
-            <div class="space-y-1">
-              <label for="password" class="block text-sm font-medium text-neutral-400"> Password </label>
-              <div class="mt-1">
-                <input placeholder="********" id="password" name="password" type="password" autocomplete="new-password" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
-              </div>
-            </div>
-
-            <div>
-              <button type="submit" class="w-full flex transition justify-center py-2 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-neutral-800 bg-white hover:bg-neutral-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-500">Register</button>
-            </div>
-            
-            <% if (req.query.err && req.query.err == "InvalidCredentials") { %>
-              <div class="mt-2"></div>
-              <span class="text-amber-600 pt-4 font-normal text-sm">Invalid credentials. Please try again.</span>
-            <% } %>
-          </form>
+          <% } %>
         </div>
       </div>
-      <div class="mt-6 text-sm text-neutral-500">
-        Already have an account? <a href="/login" class="font-normal text-neutral-500 hover:text-white transition ">Sign in</a>
+    </div>
+
+    <!-- Right Side - Visual -->
+    <div class="hidden lg:flex lg:flex-1 relative overflow-hidden bg-gradient-to-br from-[#0f0f0f] to-[#171717]">
+      <div class="absolute inset-0 flex items-center justify-center">
+        <!-- Decorative elements -->
+        <div class="absolute w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl"></div>
+        <div class="absolute w-64 h-64 bg-cyan-400/5 rounded-full blur-2xl translate-x-20 -translate-y-20"></div>
+        
+        <!-- Content -->
+        <div class="relative z-10 text-center px-12">
+          <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 mb-8 shadow-lg shadow-cyan-500/30">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-10 h-10 text-white">
+              <path d="M6.25 6.375a4.125 4.125 0 1 1 8.25 0 4.125 4.125 0 0 1-8.25 0ZM3.25 19.125a7.125 7.125 0 0 1 14.25 0v.003l-.001.119a.75.75 0 0 1-.363.63 13.067 13.067 0 0 1-6.761 1.873c-2.472 0-4.786-.684-6.76-1.873a.75.75 0 0 1-.364-.63l-.001-.122ZM19.75 7.5a.75.75 0 0 0-1.5 0v2.25H16a.75.75 0 0 0 0 1.5h2.25v2.25a.75.75 0 0 0 1.5 0v-2.25H22a.75.75 0 0 0 0-1.5h-2.25V7.5Z" />
+            </svg>
+          </div>
+          <h2 class="text-3xl font-bold text-white mb-4">Join <%= name %></h2>
+          <p class="text-zinc-500 text-lg max-w-md">Create your account and start managing your servers in minutes.</p>
+          
+          <!-- Features list -->
+          <div class="mt-8 space-y-3 text-left max-w-xs mx-auto">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 text-cyan-400">
+                  <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <span class="text-sm text-zinc-400">Instant server deployment</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 text-cyan-400">
+                  <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <span class="text-sm text-zinc-400">Real-time monitoring</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 text-cyan-400">
+                  <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <span class="text-sm text-zinc-400">Secure file management</span>
+            </div>
+          </div>
+        </div>
       </div>
+      
+      <!-- Grid pattern -->
+      <div class="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"></div>
     </div>
   </div>
-  <div class="hidden lg:block relative w-0 flex-1">
-    <img class="absolute inset-0 h-full w-full object-cover" src="https://i.imgur.com/8G5eRWX.jpeg" alt="">
-  </div>
-</div>
 </body>
 </html>
