@@ -3,129 +3,65 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= name %> - Register</title>
+  <title><%= name %></title>
   <link href="../assets/tailwind.css" rel="stylesheet">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://cdn.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=general-sans@500,300,600,400,700&display=swap" rel="stylesheet">
 </head>
-<body style="font-family: 'Inter', sans-serif" class="bg-[#0a0a0b] h-full antialiased">
+<body style="font-family: 'General Sans'" class="bg-[#141414] h-full">
 <div class="min-h-full flex">
-  <!-- Left Side - Form -->
   <div class="flex-1 flex flex-col justify-center py-12 px-4 sm:px-6 lg:flex-none lg:px-20 xl:px-24">
     <div class="mx-auto w-full max-w-sm lg:w-96">
-      <!-- Header -->
-      <div class="mb-10">
-        <div class="flex items-center gap-3 mb-8">
-          <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center">
-            <span class="text-white font-bold text-lg">O</span>
-          </div>
-          <span class="text-white font-semibold text-xl"><%= name %></span>
-        </div>
-        <h1 class="text-2xl font-semibold text-white">Create an account</h1>
-        <p class="mt-2 text-sm text-zinc-500">
-          Get started with your free account today
+      <div>
+        <img class="h-12 w-auto rounded-xl" src="<%= settings.logo %>" alt="">
+        <h2 class="mt-6 text-3xl font-medium text-white">Register an account</h2>
+        <p class="mt-2 text-sm text-neutral-500">
+          Please enter your details below.
         </p>
       </div>
 
-      <!-- Form -->
-      <form method="POST" action="/auth/register" class="space-y-5">
-        <div>
-          <label for="username" class="block text-sm font-medium text-zinc-400 mb-2">Username</label>
-          <input 
-            placeholder="Choose a username" 
-            id="username" 
-            name="username" 
-            autocomplete="username" 
-            required 
-            class="w-full px-4 py-3 bg-[#111113] border border-white/10 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all duration-200 text-sm">
-        </div>
+      <div class="mt-8">
+        <div class="mt-6">
+          <form method="POST" action="/auth/register" class="space-y-6">
+            <div>
+              <label for="username" class="block text-sm font-medium text-neutral-400"> Username </label>
+              <div class="mt-1">
+                <input placeholder="example" id="username" name="username" autocomplete="username" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
+              </div>
+            </div>
 
-        <div>
-          <label for="email" class="block text-sm font-medium text-zinc-400 mb-2">Email</label>
-          <input 
-            placeholder="Enter your email" 
-            id="email" 
-            name="email" 
-            type="email"
-            autocomplete="email" 
-            required 
-            class="w-full px-4 py-3 bg-[#111113] border border-white/10 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all duration-200 text-sm">
-        </div>
+            <div>
+              <label for="email" class="block text-sm font-medium text-neutral-400"> Email </label>
+              <div class="mt-1">
+                <input placeholder="example@domain.com" id="email" name="email" autocomplete="email" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
+              </div>
+            </div>
 
-        <div>
-          <label for="password" class="block text-sm font-medium text-zinc-400 mb-2">Password</label>
-          <input 
-            placeholder="Create a strong password" 
-            id="password" 
-            name="password" 
-            type="password" 
-            autocomplete="new-password" 
-            required 
-            class="w-full px-4 py-3 bg-[#111113] border border-white/10 rounded-xl text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all duration-200 text-sm">
-        </div>
+            <div class="space-y-1">
+              <label for="password" class="block text-sm font-medium text-neutral-400"> Password </label>
+              <div class="mt-1">
+                <input placeholder="********" id="password" name="password" type="password" autocomplete="new-password" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
+              </div>
+            </div>
 
-        <button 
-          type="submit" 
-          class="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-400 text-[#0a0a0b] font-medium rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-cyan-500/25 active:scale-[0.98] text-sm">
-          Create account
-        </button>
-        
-        <% if (req.query.err && req.query.err == "InvalidCredentials") { %>
-        <div class="flex items-center gap-2 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-          <svg class="w-5 h-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-          </svg>
-          <span class="text-amber-500 text-sm">Invalid credentials. Please try again.</span>
-        </div>
-        <% } %>
-      </form>
-
-      <p class="mt-8 text-center text-sm text-zinc-500">
-        Already have an account? 
-        <a href="/login" class="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">Sign in</a>
-      </p>
-    </div>
-  </div>
-
-  <!-- Right Side - Visual -->
-  <div class="hidden lg:flex relative w-0 flex-1 bg-[#111113]">
-    <div class="absolute inset-0 flex items-center justify-center p-12">
-      <div class="max-w-lg text-center">
-        <div class="w-20 h-20 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shadow-lg shadow-cyan-500/25">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-10 h-10 text-white">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
-          </svg>
-        </div>
-        <h2 class="text-3xl font-semibold text-white mb-4">Join our community</h2>
-        <p class="text-zinc-500 text-lg leading-relaxed">Start managing your game servers today. Create your free account and get instant access.</p>
-        
-        <div class="mt-12 flex items-center justify-center gap-8">
-          <div class="flex items-center gap-2 text-zinc-400">
-            <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
-            <span class="text-sm">Free forever</span>
-          </div>
-          <div class="flex items-center gap-2 text-zinc-400">
-            <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
-            <span class="text-sm">No credit card</span>
-          </div>
-          <div class="flex items-center gap-2 text-zinc-400">
-            <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
-            <span class="text-sm">Instant setup</span>
-          </div>
+            <div>
+              <button type="submit" class="w-full flex transition justify-center py-2 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-neutral-800 bg-white hover:bg-neutral-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-500">Register</button>
+            </div>
+            
+            <% if (req.query.err && req.query.err == "InvalidCredentials") { %>
+              <div class="mt-2"></div>
+              <span class="text-amber-600 pt-4 font-normal text-sm">Invalid credentials. Please try again.</span>
+            <% } %>
+          </form>
         </div>
       </div>
+      <div class="mt-6 text-sm text-neutral-500">
+        Already have an account? <a href="/login" class="font-normal text-neutral-500 hover:text-white transition ">Sign in</a>
+      </div>
     </div>
-    
-    <!-- Decorative elements -->
-    <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent"></div>
-    <div class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent"></div>
+  </div>
+  <div class="hidden lg:block relative w-0 flex-1">
+    <img class="absolute inset-0 h-full w-full object-cover" src="https://i.imgur.com/8G5eRWX.jpeg" alt="">
   </div>
 </div>
 </body>
