@@ -3,267 +3,165 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= name %> - Sign In</title>
+  <title><%= name %> - Login</title>
   <link href="../assets/tailwind.css" rel="stylesheet">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    .gradient-border {
-      position: relative;
-    }
-    .gradient-border::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 0.75rem;
-      padding: 1px;
-      background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), transparent, rgba(34, 211, 238, 0.1));
-      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      pointer-events: none;
-    }
-    .input-focus:focus {
-      border-color: rgba(34, 211, 238, 0.5);
-      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1);
-    }
-  </style>
+  <link rel="preconnect" href="https://cdn.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=general-sans@500,300,600,400,700&display=swap" rel="stylesheet">
 </head>
-<body style="font-family: 'Inter', sans-serif" class="bg-[#0a0a0a] h-full text-white">
-  <div class="min-h-full flex">
-    <!-- Left Side - Form -->
-    <div class="flex-1 flex flex-col justify-center px-6 py-12 lg:px-20 xl:px-28">
-      <div class="mx-auto w-full max-w-sm">
-        <!-- Logo & Title -->
-        <div class="mb-10">
-          <% if (logo == true) { %>
-            <img class="h-10 w-auto rounded-xl mb-8" src="../assets/logo.png" alt="<%= name %>">
-          <% } else { %>
-            <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center mb-8">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 text-white">
-                <path d="M12.378 1.602a.75.75 0 0 0-.756 0L3 6.632l9 5.25 9-5.25-8.622-5.03ZM21.75 7.93l-9 5.25v9l8.628-5.032a.75.75 0 0 0 .372-.648V7.93ZM11.25 22.18v-9l-9-5.25v8.57a.75.75 0 0 0 .372.648l8.628 5.033Z" />
-              </svg>
-            </div>
-          <% } %>
-          <h1 class="text-2xl font-semibold tracking-tight text-white">Welcome back</h1>
-          <p class="mt-2 text-sm text-zinc-500">Sign in to your account to continue</p>
-        </div>
+<body style="font-family: 'General Sans'" class="bg-[#141414] h-full">
+<div class="min-h-full flex">
+  <div class="flex-1 flex flex-col justify-center py-12 px-4 sm:px-6 lg:flex-none lg:px-20 xl:px-24">
+    <div class="mx-auto w-full max-w-sm lg:w-96">
+      <div>
+        <% if (logo == true) { %><img class="h-12 w-auto rounded-xl" src="../assets/logo.png"> <% } %>
+        <h2 class="<% if (logo == true) { %>mt-6<% } %> text-3xl font-medium text-white">Sign in to <%= name %></h2>
+        <p class="mt-2 text-sm font-normal text-neutral-500">
+          Please enter your account credentials below.
+        </p>
+      </div>
 
-        <!-- Form -->
-        <form id="login-form" class="space-y-5" onsubmit="event.preventDefault(); submitForm();">
-          <div>
-            <label for="username" class="block text-sm font-medium text-zinc-400 mb-2">Username or Email</label>
-            <input 
-              placeholder="Enter your username" 
-              id="username" 
-              autocomplete="username" 
-              required 
-              class="input-focus w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none transition-all duration-200 text-sm">
-          </div>
-
-          <div>
-            <label for="password" class="block text-sm font-medium text-zinc-400 mb-2">Password</label>
-            <input 
-              placeholder="Enter your password" 
-              id="password" 
-              name="password" 
-              type="password" 
-              autocomplete="current-password" 
-              required 
-              class="input-focus w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-zinc-600 focus:outline-none transition-all duration-200 text-sm">
-          </div>
-
-          <div class="flex items-center justify-between">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input id="remember-me" name="remember-me" type="checkbox" class="h-4 w-4 rounded border-white/20 bg-white/5 text-cyan-500 focus:ring-cyan-500/30">
-              <span class="text-sm text-zinc-500">Remember me</span>
-            </label>
-            <a href="/auth/reset-password" class="text-sm text-zinc-500 hover:text-cyan-400 transition-colors duration-200">Forgot password?</a>
-          </div>
-
-          <button type="submit" onclick="submitForm()" class="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-white font-medium rounded-xl transition-all duration-200 text-sm shadow-lg shadow-cyan-500/20">
-            Sign in
-          </button>
-          
-          <% if (settings.register) { %>
-          <p class="text-center text-sm text-zinc-500">
-            Don't have an account? 
-            <a href="/register" class="text-cyan-400 hover:text-cyan-300 transition-colors duration-200 font-medium">Create one</a>
-          </p>
-          <% } %>
-        </form>
-
-        <!-- Error/Success Messages -->
+      <div class="mt-8">
         <div class="mt-6">
-          <% if (req.query.err && req.query.err == "InvalidCredentials") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-red-400 shrink-0">
-                <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-red-400">Invalid credentials. Please try again.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.err && req.query.err == "UpdatedCredentials") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-emerald-400 shrink-0">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-emerald-400">Account updated. Please sign in with your new credentials.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "EmailVerified") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-emerald-400 shrink-0">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-emerald-400">Email verified! You can now sign in.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "InvalidVerificationToken") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-amber-400 shrink-0">
-                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-amber-400">Invalid or expired verification link.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "VerificationEmailResent") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-emerald-400 shrink-0">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-emerald-400">Verification email sent. Check your inbox.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "UserNotFound") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-red-400 shrink-0">
-                <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-red-400">User not found.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "UserAlreadyVerified") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-amber-400 shrink-0">
-                <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-amber-400">Account already verified. Please sign in.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "AccountcreateEmailSent") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-emerald-400 shrink-0">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-emerald-400">Account created! Check your email to verify.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg == "AccountCreated") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-emerald-400 shrink-0">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-emerald-400">Account created! You can now sign in.</span>
-            </div>
-          <% } %>
-
-          <% if (req.query.err && req.query.err === "UserNotVerified") { %>
-            <div class="flex items-center gap-2 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-amber-400 shrink-0">
-                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-              </svg>
-              <span class="text-sm text-amber-400">
-                Please verify your email. 
-                <a href="/resend-verification" class="text-amber-300 hover:text-amber-200 underline">Resend email</a>
-              </span>
-            </div>
-          <% } %>
-
-          <% if (req.query.msg && req.query.msg === 'PasswordReset') { %>
-            <% if (req.query.state && req.query.state === 'success') { %>
-              <div class="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-emerald-400 shrink-0">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-                </svg>
-                <span class="text-sm text-emerald-400">Password updated successfully!</span>
+          <form id="login-form" class="space-y-6" onsubmit="event.preventDefault(); submitForm();">
+            <div>
+              <label for="email" class="block text-sm font-medium text-neutral-400"> Username or Email </label>
+              <div class="mt-2">
+                <input placeholder="example" id="username" autocomplete="username" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
               </div>
-            <% } else if (req.query.state && req.query.state === 'failed') { %>
-              <div class="flex items-center gap-2 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-red-400 shrink-0">
-                  <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-                </svg>
-                <span class="text-sm text-red-400">Password reset failed. Please try again.</span>
+            </div>
+
+            <div class="space-y-1">
+              <label for="password" class="block text-sm font-medium text-neutral-400"> Password </label>
+              <div class="mt-2">
+                <input placeholder="********" id="password" name="password" type="password" autocomplete="current-password" required class="appearance-none block w-full px-3 py-2 bg-white/10 border border-transparent rounded-xl placeholder-neutral-500 focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 text-white transition sm:text-sm">
               </div>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="flex items-center">
+                <input id="remember-me" name="remember-me" type="checkbox" class="h-4 w-4 text-neutral-600 focus:ring-neutral-500 border-white/10 bg-white/5 rounded">
+                <label for="remember-me" class="ml-2 block text-sm text-neutral-400"> Remember me </label>
+              </div>
+
+              <div class="text-sm">
+                <a href="/auth/reset-password" class="font-normal text-neutral-500 hover:text-white transition ">Forgot your password?</a>
+              </div>
+            </div>
+
+            <div>
+              <a onclick="submitForm()" class="w-full cursor-pointer flex transition justify-center py-2 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-neutral-800 bg-white hover:bg-neutral-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-500">Sign in</a>
+            </div>
+            
+            <% if (settings.register) { %>
+            <!-- <div class="text-center mt-4">
+              <a href="/register" class="w-full cursor-pointer flex transition justify-center py-2 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500">Register</a>
+            </div> -->
+
+            <div class=" mt-6 text-sm text-neutral-500 py-[-50px]">
+              <!-- <a href="/register" class="font-normal text-neutral-500 hover:text-white transition ">Don't have an account? Create one!</a> -->
+              Need an account? <a href="/register" class="font-normal text-neutral-500 hover:text-white transition ">Register</a>
+            </div>
             <% } %>
-          <% } %>
-        </div>
-      </div>
-    </div>
 
-    <!-- Right Side - Visual -->
-    <div class="hidden lg:flex lg:flex-1 relative overflow-hidden bg-gradient-to-br from-[#0f0f0f] to-[#171717]">
-      <div class="absolute inset-0 flex items-center justify-center">
-        <!-- Decorative elements -->
-        <div class="absolute w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl"></div>
-        <div class="absolute w-64 h-64 bg-cyan-400/5 rounded-full blur-2xl -translate-x-20 translate-y-20"></div>
-        
-        <!-- Content -->
-        <div class="relative z-10 text-center px-12">
-          <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 mb-8 shadow-lg shadow-cyan-500/30">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-10 h-10 text-white">
-              <path d="M12.378 1.602a.75.75 0 0 0-.756 0L3 6.632l9 5.25 9-5.25-8.622-5.03ZM21.75 7.93l-9 5.25v9l8.628-5.032a.75.75 0 0 0 .372-.648V7.93ZM11.25 22.18v-9l-9-5.25v8.57a.75.75 0 0 0 .372.648l8.628 5.033Z" />
-            </svg>
-          </div>
-          <h2 class="text-3xl font-bold text-white mb-4"><%= name %></h2>
-          <p class="text-zinc-500 text-lg max-w-md">Powerful server management made simple. Deploy, manage, and scale with ease.</p>
+            <% if (req.query.err && req.query.err == "InvalidCredentials") { %>
+              <div class="mt-2"></div>
+              <span class="text-amber-600 pt-4 font-normal text-sm">Invalid credentials. Please try again.</span>
+            <% } %>
+
+            <% if (req.query.err && req.query.err == "UpdatedCredentials") { %>
+              <div class="mt-2"></div>
+              <span class="text-emerald-600 pt-8 font-normal text-sm">Your account has been updated, please enter your new credentials.</span>
+            <% } %>
+
+            <% if (req.query.msg && req.query.msg == "EmailVerified") { %>
+              <div class="mt-2"></div>
+              <span class="text-emerald-600 pt-8 font-normal text-sm">Your account has been Verified, you can login now.</span>
+            <% } %>
+            <% if (req.query.msg && req.query.msg == "InvalidVerificationToken") { %>
+              <div class="mt-2"></div>
+              <span class="text-amber-600 pt-4 font-normal text-sm">Your verification link invalid or expire, please try again.</span>
+            <% } %>
+            <% if (req.query.msg && req.query.msg == "VerificationEmailResent") { %>
+              <div class="mt-2"></div>
+              <span class="text-emerald-600 pt-8 font-normal text-sm">Your verification link resent successfully, check your email.</span>
+            <% } %>
+            <% if (req.query.msg && req.query.msg == "UserNotFound") { %>
+              <div class="mt-2"></div>
+              <span class="text-amber-600 pt-4 font-normal text-sm">User not found, please try again.</span>
+            <% } %>
+            <% if (req.query.msg && req.query.msg == "UserAlreadyVerified") { %>
+              <div class="mt-2"></div>
+              <span class="text-amber-600 pt-4 font-normal text-sm">Your account is already verified, you may sign in.</span>
+            <% } %>
+            <% if (req.query.msg && req.query.msg == "AccountcreateEmailSent") { %>
+              <div class="mt-2"></div>
+              <span class="text-emerald-600 pt-8 font-normal text-sm">Your account was successfully created - please check your email to continue.</span>
+            <% } %>
+            <% if (req.query.msg && req.query.msg == "AccountCreated") { %>
+              <div class="mt-2"></div>
+              <span class="text-emerald-600 pt-8 font-normal text-sm">Your account was successfully created, you may sign in now.</span>
+            <% } %>
+            <% if (req.query.err && req.query.err === "UserNotVerified") { %>
+              <div class="mt-6 text-center">
+                <p class="text-red-500 text-lg font-medium mb-2">Your account isn't verify, please check your email. <a href="/resend-verification" class="text-red-300 hover:text-red-400 transition">Resend Email</a></p>
+              </div>
+            <% } %>                                                                                 
+
+            <% if (req.query.msg && req.query.msg === 'PasswordReset') { %>
+              <% if (req.query.state && req.query.state === 'success') { %>
+                <span class="text-emerald-600 pt-8 font-normal text-sm">Your password has been successfully updated.</span>
+              <% } else if (req.query.state && req.query.state === 'failed') { %>
+                <span class="text-red-500 pt-4 font-normal text-sm">Password reset failed. Please try again.</span>
+              <% } %>
+            <% } %>
+          </form>
         </div>
       </div>
-      
-      <!-- Grid pattern -->
-      <div class="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"></div>
     </div>
   </div>
+  <div class="hidden lg:block relative w-0 flex-1">
+    <img class="absolute inset-0 h-full w-full object-cover" src="https://i.imgur.com/j9BodUY.jpeg" alt="">
+  </div>
+</div>
 
-  <script>
-    document.getElementById('login-form').addEventListener('keypress', function(event) {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        let username = document.getElementById("username").value.trim();
-        let password = document.getElementById("password").value.trim();
+<script>
+  async function submitForm() {
+    let username = encodeURIComponent(document.getElementById("username").value);
+    let password = encodeURIComponent(document.getElementById("password").value);
+    document.location.href = `/auth/login?username=${username}&password=${password}`;
+  }
+  
+  document.getElementById('login-form').addEventListener('keypress', function(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    let username = document.getElementById("username").value.trim();
+    let password = document.getElementById("password").value.trim();
 
-        if (username !== "" && password === "") {
-          document.getElementById("password").focus();
-        } else {
-          submitForm();
-        }
-      }
-    });
-
-    async function submitForm() {
-      let username = document.getElementById("username").value.trim();
-      let password = document.getElementById("password").value.trim();
-      
-      if (username === "" || password === "") {
-        document.location.href = `/auth/login?err=InvalidCredentials&state=failed`;
-        return;
-      }
-      
-      let encodedUsername = encodeURIComponent(username);
-      let encodedPassword = encodeURIComponent(password);
-      
-      document.location.href = `/auth/login?username=${encodedUsername}&password=${encodedPassword}`;
+    if (username !== "" && password === "") {
+      document.getElementById("password").focus();
+    } else {
+      submitForm();
     }
-  </script>
+  }
+});
+
+  async function submitForm() {
+    let username = document.getElementById("username").value.trim();
+    let password = document.getElementById("password").value.trim();
+    
+    if (username === "" || password === "") {
+      document.location.href = `/auth/login?err=InvalidCredentials&state=failed`;
+      return;
+    }
+    
+    let encodedUsername = encodeURIComponent(username);
+    let encodedPassword = encodeURIComponent(password);
+    
+    document.location.href = `/auth/login?username=${encodedUsername}&password=${encodedPassword}`;
+  }
+</script>
+
 </body>
 </html>
