@@ -84,3 +84,13 @@ export interface HostVpsInfo {
   pythonVersion: string | null;
   activeServersCount: number;
 }
+
+export interface AdminUserSummary extends PublicUser {
+  serverCount: number;
+}
+
+export interface AdminServerSummary extends ServerWithMetrics {
+  ownerName: string;
+  ownerEmail: string;
+}
+

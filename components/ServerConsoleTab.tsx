@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChevronRight,
+  CornerDownLeft,
   Play,
   RotateCw,
   Square,
@@ -11,12 +13,15 @@ import {
 import {
   Area,
   AreaChart,
+  CartesianGrid,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
   YAxis,
 } from 'recharts';
 import { apiFetch, buildAuthHeaders } from './api-client';
 import { ConsoleLinesSkeleton } from './Skeletons';
+import { tokenizeConsoleLine } from '@/lib/console-highlighter';
 import { showErrorToast, showInfoToast, showSuccessToast } from '@/lib/swal';
 import type {
   ConsoleLine,
@@ -66,73 +71,35 @@ function formatTimeLabel(date = new Date()): string {
   });
 }
 
-function renderHighlightedLogText(text: string): React.ReactNode {
+function renderHighlightedLogText(text: string, defaultClass = ''): React.ReactNode {
   if (!text) return null;
-  const parts: React.ReactNode[] = [];
-  const regex = /(\[?(?:INFO|WARN|ERROR|FATAL|DEBUG|SUCCESS|OK|daemon)\]?|\b(?:GET|POST|PUT|DELETE|PATCH)\b|\b[1-5]\d{2}\b|\b[a-zA-Z0-9_/.-]+\.(?:js|ts|py|json|html|css|txt|log)\b)/g;
+  const tokens = tokenizeConsoleLine(text, defaultClass);
+  return (
+    <>
+      {tokens.map((tok, idx) =>
+        tok.className ? (
+          <span key={idx} className={tok.className}>
+            {tok.text}
+          </span>
+        ) : (
+          <React.Fragment key={idx}>{tok.text}</React.Fragment>
+        )
+      )}
+    </>
+  );
+}
 
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    const matchStr = match[0];
-    const startIndex = match.index;
-
-    if (startIndex > lastIndex) {
-      parts.push(text.slice(lastIndex, startIndex));
-    }
-
-    const upper = matchStr.toUpperCase();
-    if (upper.includes('ERROR') || upper.includes('FATAL')) {
-      parts.push(
-        <span key={`${startIndex}-err`} className="text-red-400 font-semibold bg-red-500/10 px-1 rounded">
-          {matchStr}
-        </span>
-      );
-    } else if (upper.includes('WARN')) {
-      parts.push(
-        <span key={`${startIndex}-warn`} className="text-amber-400 font-semibold">
-          {matchStr}
-        </span>
-      );
-    } else if (upper.includes('INFO') || upper.includes('SUCCESS') || upper.includes('OK') || upper.includes('DAEMON')) {
-      parts.push(
-        <span key={`${startIndex}-info`} className="text-cyan-400 font-semibold">
-          {matchStr}
-        </span>
-      );
-    } else if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(upper)) {
-      parts.push(
-        <span key={`${startIndex}-http`} className="text-emerald-400 font-bold px-1 bg-emerald-500/10 rounded">
-          {matchStr}
-        </span>
-      );
-    } else if (/^[1-5]\d{2}$/.test(matchStr)) {
-      const code = Number(matchStr);
-      const colorClass = code < 300 ? 'text-emerald-400 font-bold' : code < 400 ? 'text-amber-400 font-bold' : 'text-red-400 font-bold';
-      parts.push(
-        <span key={`${startIndex}-status`} className={colorClass}>
-          {matchStr}
-        </span>
-      );
-    } else if (/\.(?:js|ts|py|json|html|css|txt|log)$/.test(matchStr)) {
-      parts.push(
-        <span key={`${startIndex}-file`} className="text-purple-300 underline underline-offset-2">
-          {matchStr}
-        </span>
-      );
-    } else {
-      parts.push(matchStr);
-    }
-
-    lastIndex = regex.lastIndex;
+function loadSavedHistory(serverId: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(`cmnty_cmd_history_${serverId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string').slice(0, 50)
+      : [];
+  } catch {
+    return [];
   }
-
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-
-  return <>{parts}</>;
 }
 
 export default function ServerConsoleTab({
@@ -150,11 +117,17 @@ export default function ServerConsoleTab({
     },
   ]);
   const [command, setCommand] = useState('');
+  const [commandHistory, setCommandHistory] = useState<string[]>(() =>
+    typeof window !== 'undefined' ? loadSavedHistory(server.id) : []
+  );
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [powerLoading, setPowerLoading] = useState<string | null>(null);
   const [connectingStream, setConnectingStream] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const terminalRef = useRef<HTMLDivElement>(null);
+  const commandInputRef = useRef<HTMLInputElement>(null);
   const onMetricsRef = useRef(onMetricsUpdate);
+  const lastStreamMetricsAtRef = useRef<number>(0);
 
   useEffect(() => {
     onMetricsRef.current = onMetricsUpdate;
@@ -170,10 +143,12 @@ export default function ServerConsoleTab({
   };
 
   useEffect(() => {
-    const controller = new AbortController();
+    let controller = new AbortController();
     let active = true;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function connectStream() {
+      controller = new AbortController();
       try {
         const res = await fetch(`/api/servers/${server.id}/console`, {
           method: 'GET',
@@ -183,7 +158,14 @@ export default function ServerConsoleTab({
         });
 
         if (!res.ok || !res.body) {
-          if (active) setConnectingStream(false);
+          if (active) {
+            setConnectingStream(false);
+            if (res.status !== 401 && res.status !== 403 && res.status !== 404) {
+              reconnectTimer = setTimeout(() => {
+                if (active) void connectStream();
+              }, 2000);
+            }
+          }
           return;
         }
 
@@ -221,6 +203,7 @@ export default function ServerConsoleTab({
                 setLogs((prev) => [...prev.slice(-399), parsed as ConsoleLine]);
               } else if (eventName === 'metrics') {
                 const nextMetrics = parsed as ServerRuntimeMetrics;
+                lastStreamMetricsAtRef.current = Date.now();
                 setStreamMetrics(nextMetrics);
                 appendMetricSample(nextMetrics);
                 onMetricsRef.current(nextMetrics);
@@ -230,16 +213,44 @@ export default function ServerConsoleTab({
             }
           }
         }
+
+        if (active && !controller.signal.aborted) {
+          reconnectTimer = setTimeout(() => {
+            if (active) void connectStream();
+          }, 2000);
+        }
       } catch {
-        // aborted
+        if (active && !controller.signal.aborted) {
+          reconnectTimer = setTimeout(() => {
+            if (active) void connectStream();
+          }, 2000);
+        }
       } finally {
         if (active) setConnectingStream(false);
       }
     }
 
-    connectStream();
+    void connectStream();
+
+    // Fallback polling in case SSE stream is buffered by a proxy
+    const fallbackTimer = setInterval(async () => {
+      if (!active) return;
+      if (Date.now() - lastStreamMetricsAtRef.current < 1800) return;
+      try {
+        const res = await apiFetch<{ server: ServerWithMetrics }>(`/api/servers/${server.id}`);
+        if (!active || !res.server?.metrics) return;
+        setStreamMetrics(res.server.metrics);
+        appendMetricSample(res.server.metrics);
+        onMetricsRef.current(res.server.metrics);
+      } catch {
+        // ignore transient poll errors
+      }
+    }, 1500);
+
     return () => {
       active = false;
+      clearInterval(fallbackTimer);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       controller.abort();
     };
   }, [server.id]);
@@ -249,6 +260,43 @@ export default function ServerConsoleTab({
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [logs, autoScroll]);
+
+  const isRunning = metrics.status === 'running';
+  const isBusy = metrics.status === 'installing' || metrics.status === 'starting';
+  const canSendInput = isRunning || isBusy;
+
+  useEffect(() => {
+    commandInputRef.current?.focus();
+  }, [server.id, isRunning]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable ||
+          ((target.tagName === 'BUTTON' || target.tagName === 'A') && e.key === ' '))
+      ) {
+        return;
+      }
+      if (document.querySelector('[role="dialog"], .swal2-container')) {
+        return;
+      }
+      const selection = window.getSelection()?.toString();
+      if (selection && selection.length > 0) return;
+
+      if (e.key.length === 1 || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        commandInputRef.current?.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   async function runPowerAction(
     action: 'start' | 'stop' | 'restart' | 'kill'
@@ -273,6 +321,7 @@ export default function ServerConsoleTab({
       };
       if (action === 'start' || action === 'restart') {
         void showSuccessToast(toastMap[action]);
+        commandInputRef.current?.focus();
       } else {
         void showInfoToast(toastMap[action]);
       }
@@ -289,17 +338,56 @@ export default function ServerConsoleTab({
   async function handleSendCommand(e: React.FormEvent) {
     e.preventDefault();
     if (!command.trim()) return;
+    if (!canSendInput) {
+      void showInfoToast('Server sedang offline', 'Tekan Start untuk menjalankan proses.');
+      commandInputRef.current?.focus();
+      return;
+    }
+
+    const cmdToSend = command;
+    setCommand('');
+    setHistoryIndex(-1);
+    setCommandHistory((prev) => {
+      const next = prev[0] === cmdToSend ? prev : [cmdToSend, ...prev.slice(0, 49)];
+      try {
+        window.localStorage.setItem(`cmnty_cmd_history_${server.id}`, JSON.stringify(next));
+      } catch {
+        // ignore storage quota errors
+      }
+      return next;
+    });
+
     try {
       await apiFetch(`/api/servers/${server.id}/console`, {
         method: 'POST',
-        body: JSON.stringify({ command }),
+        body: JSON.stringify({ command: cmdToSend }),
       });
-      setCommand('');
     } catch (err) {
       void showErrorToast(
         'Gagal Mengirim Perintah',
         err instanceof Error ? err.message : 'Gagal mengirim perintah ke stdin.'
       );
+    } finally {
+      commandInputRef.current?.focus();
+    }
+  }
+
+  function handleCommandKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'ArrowUp') {
+      if (commandHistory.length === 0) return;
+      e.preventDefault();
+      const nextIdx = Math.min(commandHistory.length - 1, historyIndex + 1);
+      setHistoryIndex(nextIdx);
+      setCommand(commandHistory[nextIdx]);
+    } else if (e.key === 'ArrowDown') {
+      if (historyIndex <= -1) return;
+      e.preventDefault();
+      const nextIdx = historyIndex - 1;
+      setHistoryIndex(nextIdx);
+      setCommand(nextIdx >= 0 ? commandHistory[nextIdx] : '');
+    } else if (e.key === 'Escape') {
+      setHistoryIndex(-1);
+      setCommand('');
     }
   }
 
@@ -316,11 +404,10 @@ export default function ServerConsoleTab({
         'Gagal Membersihkan Console',
         err instanceof Error ? err.message : 'Terjadi kesalahan saat membersihkan console.'
       );
+    } finally {
+      commandInputRef.current?.focus();
     }
   }
-
-  const isRunning = metrics.status === 'running';
-  const isBusy = metrics.status === 'installing' || metrics.status === 'starting';
 
   const chartData = useMemo(() => {
     if (metricsHistory.length === 1) {
@@ -335,8 +422,9 @@ export default function ServerConsoleTab({
       metrics.cpuPercent,
       0
     );
-    if (peak <= 0) return 2;
-    return Number(Math.max(2, peak * 1.25).toFixed(2));
+    if (peak <= 0) return 1;
+    if (peak < 1) return Number(Math.max(0.5, peak * 1.5).toFixed(2));
+    return Number((peak * 1.25).toFixed(2));
   }, [chartData, metrics.cpuPercent]);
 
   const ramChartMax = useMemo(() => {
@@ -355,8 +443,8 @@ export default function ServerConsoleTab({
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-10">
-      {/* Top Power Actions Bar - Original Button Design, Full-Width Horizontal Layout */}
-      <div className="bg-[#181b22] border border-zinc-800 rounded-lg p-3 grid grid-cols-4 gap-2 text-xs text-zinc-300">
+      {/* Top Power Actions Bar */}
+      <div className="bg-[#181b22] border border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-zinc-300">
         <button
           type="button"
           disabled={isRunning || isBusy || powerLoading !== null}
@@ -377,7 +465,7 @@ export default function ServerConsoleTab({
         </button>
         <button
           type="button"
-          disabled={!isRunning || powerLoading !== null}
+          disabled={(!isRunning && !isBusy) || powerLoading !== null}
           onClick={() => runPowerAction('stop')}
           className="h-8 w-full px-3 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
         >
@@ -386,7 +474,7 @@ export default function ServerConsoleTab({
         </button>
         <button
           type="button"
-          disabled={!isRunning || powerLoading !== null}
+          disabled={(!isRunning && !isBusy) || powerLoading !== null}
           onClick={() => runPowerAction('kill')}
           className="h-8 w-full px-3 rounded bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
           title="Kill paksa proses (SIGKILL)"
@@ -397,48 +485,37 @@ export default function ServerConsoleTab({
       </div>
 
       {/* Console Window */}
-      <div className="bg-[#141920] border border-[#2c3746] rounded-md overflow-hidden shadow-xl flex flex-col">
-        <div className="px-4 py-2.5 bg-[#1b222c] border-b border-[#2c3746] flex items-center justify-between gap-4">
+      <div className="bg-[#12161e] border border-zinc-800 rounded-md overflow-hidden flex flex-col">
+        <div className="px-3 sm:px-4 py-2 bg-[#171c26] border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
           <div className="flex items-center gap-2 text-xs font-mono">
             <span
-              className={`inline-flex items-center gap-1.5 font-semibold uppercase px-2.5 py-0.5 rounded text-[11px] border ${
+              className={`inline-flex items-center font-medium uppercase px-2 py-0.5 rounded text-[11px] border ${
                 isRunning
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
                   : metrics.status === 'error'
-                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                  ? 'bg-red-500/10 text-red-400 border-red-500/25'
                   : isBusy
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  : 'bg-[#262f3b] text-slate-400 border-[#344050]'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/25'
+                  : 'bg-zinc-800/80 text-zinc-400 border-zinc-700/80'
               }`}
             >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  isRunning
-                    ? 'bg-emerald-400 animate-pulse'
-                    : metrics.status === 'error'
-                    ? 'bg-red-400'
-                    : isBusy
-                    ? 'bg-amber-400 animate-pulse'
-                    : 'bg-slate-500'
-                }`}
-              />
               <span>{metrics.status}</span>
             </span>
           </div>
-          <div className="flex items-center gap-4 text-xs">
-            <label className="inline-flex items-center gap-1.5 text-slate-400 cursor-pointer">
+          <div className="flex items-center gap-3 sm:gap-4 text-xs">
+            <label className="inline-flex items-center gap-1.5 text-zinc-400 cursor-pointer">
               <input
                 type="checkbox"
                 checked={autoScroll}
                 onChange={(e) => setAutoScroll(e.target.checked)}
-                className="w-3 h-3 rounded border-slate-600 bg-slate-900 accent-cyan-500"
+                className="w-3 h-3 rounded border-zinc-600 bg-zinc-900 accent-zinc-400"
               />
               <span>Auto-scroll</span>
             </label>
             <button
               type="button"
               onClick={handleClearConsole}
-              className="text-slate-400 hover:text-slate-100 inline-flex items-center gap-1 transition-colors cursor-pointer"
+              className="text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1 transition-colors cursor-pointer"
             >
               <Trash2 className="w-3 h-3" />
               <span>Clear</span>
@@ -448,104 +525,130 @@ export default function ServerConsoleTab({
 
         <div
           ref={terminalRef}
-          className="h-[420px] overflow-y-auto p-4 font-mono text-[12px] leading-5 space-y-0.5 text-slate-200 bg-[#12161c]"
+          onClick={() => {
+            const selected = window.getSelection()?.toString();
+            if (!selected) {
+              commandInputRef.current?.focus();
+            }
+          }}
+          className="h-[340px] sm:h-[420px] overflow-y-auto p-3 sm:p-4 font-mono text-[12px] leading-5 space-y-0.5 text-zinc-200 bg-[#12161e] cursor-text"
         >
           {connectingStream && logs.length === 0 ? (
             <ConsoleLinesSkeleton />
           ) : logs.length === 0 ? (
-            <div className="font-mono break-words">
-              <span className="text-amber-400/90 select-none">[cmnty Daemon]: </span>
-              <span className="text-slate-400">
-                Server sedang offline. Tekan Start untuk menjalankan proses.
-              </span>
+            <div className="font-mono break-words text-zinc-500">
+              <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
+              <span>Server sedang offline. Tekan Start untuk menjalankan proses.</span>
             </div>
           ) : (
             logs.map((line) => {
               if (line.stream === 'system') {
                 return (
                   <div key={line.id} className="break-words">
-                    <span className="text-amber-400/90 select-none">[cmnty Daemon]: </span>
-                    <span className="text-slate-300">{renderHighlightedLogText(line.text)}</span>
+                    <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
+                    <span>{renderHighlightedLogText(line.text, 'text-zinc-300')}</span>
                   </div>
                 );
               }
               if (line.stream === 'stdin') {
                 return (
-                  <div key={line.id} className="break-words text-cyan-300">
-                    <span className="select-none text-cyan-500 mr-1.5 font-semibold">$</span>
-                    {renderHighlightedLogText(line.text)}
+                  <div key={line.id} className="break-words text-zinc-400">
+                    <span className="select-none text-zinc-500 mr-1.5">&gt;</span>
+                    <span>{renderHighlightedLogText(line.text.replace(/^>\s*/, ''), 'text-zinc-300')}</span>
                   </div>
                 );
               }
               if (line.stream === 'stderr') {
+                if (/^\[cmnty Daemon\]:?\s*/.test(line.text)) {
+                  const rest = line.text.replace(/^\[cmnty Daemon\]:?\s*/, '');
+                  return (
+                    <div key={line.id} className="break-words">
+                      <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
+                      <span>{renderHighlightedLogText(rest, 'text-zinc-300')}</span>
+                    </div>
+                  );
+                }
                 return (
-                  <div key={line.id} className="break-words text-red-400 bg-red-500/5 px-1.5 py-0.5 rounded border-l-2 border-red-500">
-                    {renderHighlightedLogText(line.text)}
+                  <div key={line.id} className="break-words">
+                    {renderHighlightedLogText(line.text, 'text-red-400')}
                   </div>
                 );
               }
               return (
-                <div key={line.id} className="break-words text-slate-200">
-                  {renderHighlightedLogText(line.text)}
+                <div key={line.id} className="break-words">
+                  {renderHighlightedLogText(line.text, 'text-zinc-200')}
                 </div>
               );
             })
           )}
         </div>
 
-        {/* Pterodactyl-style Professional Terminal Command Input Footer */}
+        {/* Pterodactyl-style Integrated Terminal Command Input */}
         <form
           onSubmit={handleSendCommand}
-          className="border-t border-[#1f2937] bg-[#0c1017] px-4 py-2.5 flex items-center gap-3 font-mono text-xs shadow-inner"
+          onClick={() => commandInputRef.current?.focus()}
+          className="group border-t border-zinc-800/90 bg-[#0d1016] px-3 sm:px-3.5 h-10 flex items-center gap-2 font-mono text-xs transition-colors focus-within:bg-[#10141c] cursor-text"
         >
-          <span className="text-cyan-400 select-none font-semibold tracking-tight">container@cmnty~ $</span>
+          <ChevronRight
+            className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+              canSendInput
+                ? 'text-zinc-400 group-focus-within:text-amber-400'
+                : 'text-zinc-600 group-focus-within:text-zinc-400'
+            }`}
+          />
           <input
+            ref={commandInputRef}
             type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             aria-label="Kirim input stdin ke proses server"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            placeholder={isRunning ? 'Type a command and press Enter...' : 'Server offline (tekan Start)...'}
-            disabled={!isRunning}
-            className="flex-1 bg-transparent text-slate-100 placeholder:text-slate-600 focus:outline-none disabled:opacity-40"
+            onKeyDown={handleCommandKeyDown}
+            placeholder="Type a command..."
+            className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
           />
-          {isRunning && command.trim().length > 0 && (
-            <button
-              type="submit"
-              className="h-7 px-3.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-            >
-              Kirim
-            </button>
-          )}
+          <button
+            type="submit"
+            disabled={command.trim().length === 0}
+            aria-label="Kirim perintah"
+            title="Tekan Enter untuk mengirim"
+            className="w-6 h-6 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 disabled:opacity-0 disabled:pointer-events-none transition-opacity cursor-pointer shrink-0"
+          >
+            <CornerDownLeft className="w-3.5 h-3.5" />
+          </button>
         </form>
       </div>
 
       {/* Pterodactyl-style Server Metrics & Real-Time Area Charts */}
       <div className="space-y-3">
         {/* Compact 4-Tile Resource Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3.5 py-2.5 min-w-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
+          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
             <div className="text-xs font-medium text-slate-400 truncate">
               Address
             </div>
-            <div className="text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
               :{server.port}
             </div>
           </div>
 
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3.5 py-2.5 min-w-0">
+          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
             <div className="text-xs font-medium text-slate-400 truncate">
               Uptime
             </div>
-            <div className="text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
               {formatDuration(metrics.uptimeSeconds)}
             </div>
           </div>
 
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3.5 py-2.5 min-w-0">
+          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
             <div className="text-xs font-medium text-slate-400 truncate">
               CPU Load
             </div>
-            <div className="text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
               {metrics.cpuPercent.toFixed(2)}%{' '}
               <span className="text-xs font-normal text-slate-400">
                 / {server.cpuLimitPercent}%
@@ -553,11 +656,11 @@ export default function ServerConsoleTab({
             </div>
           </div>
 
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3.5 py-2.5 min-w-0">
+          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
             <div className="text-xs font-medium text-slate-400 truncate">
               Memory
             </div>
-            <div className="text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
               {formatMemoryValue(metrics.memoryMb)}{' '}
               <span className="text-xs font-normal text-slate-400">
                 / {formatMemoryLimit(server.memoryLimitMb)}
@@ -569,13 +672,18 @@ export default function ServerConsoleTab({
         {/* CPU Load & Memory Area Charts */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {/* CPU Load Chart Card */}
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md p-4 flex flex-col gap-2">
+          <div className="bg-[#262f3b] border border-[#344050] rounded-md p-3 sm:p-4 flex flex-col gap-2 min-w-0">
             <h3 className="text-xs font-medium tracking-wide text-slate-300">CPU Load</h3>
-            <div className="h-44 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <div className="h-[176px] w-full min-w-0">
+              <ResponsiveContainer
+                width="100%"
+                height={176}
+                minWidth={0}
+                initialDimension={{ width: 420, height: 176 }}
+              >
                 <AreaChart
                   data={chartData}
-                  margin={{ top: 10, right: 6, left: -4, bottom: 2 }}
+                  margin={{ top: 10, right: 8, left: -4, bottom: 6 }}
                 >
                   <defs>
                     <linearGradient
@@ -589,9 +697,11 @@ export default function ServerConsoleTab({
                       <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.04} />
                     </linearGradient>
                   </defs>
+                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="time" hide />
                   <YAxis
                     domain={[0, cpuChartMax]}
-                    ticks={[Number((cpuChartMax / 2).toFixed(2)), cpuChartMax]}
+                    ticks={[0, Number((cpuChartMax / 2).toFixed(2)), cpuChartMax]}
                     axisLine={false}
                     tickLine={false}
                     width={56}
@@ -617,6 +727,8 @@ export default function ServerConsoleTab({
                     dataKey="cpu"
                     stroke="#06b6d4"
                     strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 3, fill: '#22d3ee', strokeWidth: 0 }}
                     fill={`url(#cpuGrad-${server.id})`}
                     isAnimationActive={false}
                   />
@@ -626,13 +738,18 @@ export default function ServerConsoleTab({
           </div>
 
           {/* Memory Chart Card */}
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md p-4 flex flex-col gap-2">
+          <div className="bg-[#262f3b] border border-[#344050] rounded-md p-3 sm:p-4 flex flex-col gap-2 min-w-0">
             <h3 className="text-xs font-medium tracking-wide text-slate-300">Memory</h3>
-            <div className="h-44 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <div className="h-[176px] w-full min-w-0">
+              <ResponsiveContainer
+                width="100%"
+                height={176}
+                minWidth={0}
+                initialDimension={{ width: 420, height: 176 }}
+              >
                 <AreaChart
                   data={chartData}
-                  margin={{ top: 10, right: 6, left: -4, bottom: 2 }}
+                  margin={{ top: 10, right: 8, left: -4, bottom: 6 }}
                 >
                   <defs>
                     <linearGradient
@@ -646,9 +763,11 @@ export default function ServerConsoleTab({
                       <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.04} />
                     </linearGradient>
                   </defs>
+                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="time" hide />
                   <YAxis
                     domain={[0, ramChartMax]}
-                    ticks={[Math.round(ramChartMax / 2), ramChartMax]}
+                    ticks={[0, Math.round(ramChartMax / 2), ramChartMax]}
                     axisLine={false}
                     tickLine={false}
                     width={58}
@@ -674,6 +793,8 @@ export default function ServerConsoleTab({
                     dataKey="ram"
                     stroke="#06b6d4"
                     strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 3, fill: '#22d3ee', strokeWidth: 0 }}
                     fill={`url(#ramGrad-${server.id})`}
                     isAnimationActive={false}
                   />

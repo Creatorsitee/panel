@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { NextRequest, NextResponse } from 'next/server';
 import type { PublicUser, UserRecord, UserRole } from './types';
 
@@ -15,7 +17,22 @@ function getSessionSecret(): string {
     return envSecret;
   }
   if (!globalForAuth.__nodalSessionSecret) {
-    globalForAuth.__nodalSessionSecret = crypto.randomBytes(32).toString('hex');
+    const secretFile = path.join(process.cwd(), 'data', '.session-secret');
+    try {
+      if (fs.existsSync(secretFile)) {
+        const persisted = fs.readFileSync(secretFile, 'utf8').trim();
+        if (persisted.length >= 32) {
+          globalForAuth.__nodalSessionSecret = persisted;
+          return persisted;
+        }
+      }
+      const generated = crypto.randomBytes(32).toString('hex');
+      fs.mkdirSync(path.dirname(secretFile), { recursive: true });
+      fs.writeFileSync(secretFile, generated, { encoding: 'utf8', mode: 0o600 });
+      globalForAuth.__nodalSessionSecret = generated;
+    } catch {
+      globalForAuth.__nodalSessionSecret = crypto.randomBytes(32).toString('hex');
+    }
   }
   return globalForAuth.__nodalSessionSecret;
 }
@@ -132,7 +149,8 @@ export function extractSessionFromRequest(req: NextRequest): SessionPayload | nu
     // Enforce same-origin / custom header check on cookie-authenticated mutations
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase())) {
       const origin = req.headers.get('origin');
-      const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
+      const rawHost = req.headers.get('x-forwarded-host') || req.headers.get('host');
+      const host = rawHost?.split(',')[0]?.trim();
       const customHeader = req.headers.get('x-requested-with');
       if (origin && host) {
         try {

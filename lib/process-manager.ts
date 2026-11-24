@@ -5,7 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { getServerById, listAllServers } from './db';
-import { ensureServerDir, readServerDotEnv, verifyServerScriptFile } from './file-manager';
+import {
+  ensureServerDir,
+  readServerDotEnv,
+  verifyServerPythonModule,
+  verifyServerScriptFile,
+} from './file-manager';
 import { parseSafeStartupCommand } from './security';
 import type { ConsoleLine, HostVpsInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
 
@@ -13,6 +18,7 @@ interface ManagedProcess {
   serverId: string;
   status: ServerStatus;
   child: ChildProcessWithoutNullStreams | null;
+  installChild: ChildProcessWithoutNullStreams | null;
   pid: number | null;
   startedAtMs: number | null;
   exitCode: number | null;
@@ -56,6 +62,7 @@ function getOrCreateState(serverId: string): ManagedProcess {
       serverId,
       status: 'stopped',
       child: null,
+      installChild: null,
       pid: null,
       startedAtMs: null,
       exitCode: null,
@@ -93,6 +100,34 @@ function emitStatus(serverId: string): void {
   getEmitter().emit(`status:${serverId}`, getServerMetrics(serverId));
 }
 
+function collectProcessGroupPids(rootPid: number): number[] {
+  const pids = new Set<number>([rootPid]);
+  try {
+    const procEntries = fs.readdirSync('/proc');
+    for (const entry of procEntries) {
+      if (!/^\d+$/.test(entry)) continue;
+      const pid = Number(entry);
+      if (pid === rootPid) continue;
+      try {
+        const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+        const closeParen = stat.lastIndexOf(')');
+        if (closeParen === -1) continue;
+        const fields = stat.slice(closeParen + 2).split(' ');
+        const ppid = Number(fields[1] || 0);
+        const pgrp = Number(fields[2] || 0);
+        if (pgrp === rootPid || ppid === rootPid) {
+          pids.add(pid);
+        }
+      } catch {
+        // process may have exited while scanning
+      }
+    }
+  } catch {
+    // fallback to rootPid only
+  }
+  return Array.from(pids);
+}
+
 function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memoryMb: number } {
   if (!state.pid || state.status !== 'running') {
     return { cpuPercent: 0, memoryMb: 0 };
@@ -110,39 +145,67 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
     return { cpuPercent: 0, memoryMb: 0 };
   }
 
+  const now = Date.now();
+  if (state.lastSampleTimeMs !== undefined && now - state.lastSampleTimeMs < 800) {
+    return { cpuPercent: state.cpuPercent, memoryMb: state.memoryMb };
+  }
+
   try {
-    // Memory RSS from /proc/<pid>/status (VmRSS in kB)
-    const statusPath = `/proc/${state.pid}/status`;
-    let memoryMb = state.memoryMb;
-    if (fs.existsSync(statusPath)) {
-      const content = fs.readFileSync(statusPath, 'utf8');
-      const match = /VmRSS:\s+(\d+)\s+kB/.exec(content);
-      if (match) {
-        memoryMb = Number((Number(match[1]) / 1024).toFixed(1));
+    const pids = collectProcessGroupPids(state.pid);
+    let totalRssKb = 0;
+    let hasRssSample = false;
+    let totalJiffies = 0;
+    let hasStatSample = false;
+
+    for (const pid of pids) {
+      try {
+        const statusPath = `/proc/${pid}/status`;
+        if (fs.existsSync(statusPath)) {
+          const content = fs.readFileSync(statusPath, 'utf8');
+          const match = /VmRSS:\s+(\d+)\s+kB/.exec(content);
+          if (match) {
+            totalRssKb += Number(match[1]);
+            hasRssSample = true;
+          }
+        }
+      } catch {
+        // ignore transient pid exit
+      }
+
+      try {
+        const statPath = `/proc/${pid}/stat`;
+        if (fs.existsSync(statPath)) {
+          const statContent = fs.readFileSync(statPath, 'utf8');
+          const closeParen = statContent.lastIndexOf(')');
+          if (closeParen !== -1) {
+            const fields = statContent.slice(closeParen + 2).split(' ');
+            const utime = Number(fields[11] || 0);
+            const stime = Number(fields[12] || 0);
+            totalJiffies += utime + stime;
+            hasStatSample = true;
+          }
+        }
+      } catch {
+        // ignore transient pid exit
       }
     }
 
-    // CPU jiffies from /proc/<pid>/stat
+    const memoryMb = hasRssSample
+      ? Number((totalRssKb / 1024).toFixed(1))
+      : state.memoryMb;
+
     let cpuPercent = state.cpuPercent;
-    const statPath = `/proc/${state.pid}/stat`;
-    if (fs.existsSync(statPath)) {
-      const statContent = fs.readFileSync(statPath, 'utf8');
-      const closeParen = statContent.lastIndexOf(')');
-      if (closeParen !== -1) {
-        const fields = statContent.slice(closeParen + 2).split(' ');
-        const utime = Number(fields[11] || 0);
-        const stime = Number(fields[12] || 0);
-        const totalJiffies = utime + stime;
-        const now = Date.now();
-        if (state.lastCpuJiffies !== undefined && state.lastSampleTimeMs !== undefined) {
-          const deltaMs = Math.max(100, now - state.lastSampleTimeMs);
-          const deltaJiffies = Math.max(0, totalJiffies - state.lastCpuJiffies);
-          const effectiveCores = detectEffectiveCpuCores(os.cpus().length);
-          cpuPercent = Number(Math.min(100 * effectiveCores, ((deltaJiffies * 10) / deltaMs) * 100).toFixed(2));
-        }
-        state.lastCpuJiffies = totalJiffies;
-        state.lastSampleTimeMs = now;
+    if (hasStatSample) {
+      if (state.lastCpuJiffies !== undefined && state.lastSampleTimeMs !== undefined) {
+        const deltaMs = Math.max(100, now - state.lastSampleTimeMs);
+        const deltaJiffies = Math.max(0, totalJiffies - state.lastCpuJiffies);
+        const effectiveCores = detectEffectiveCpuCores(os.cpus().length);
+        cpuPercent = Number(
+          Math.min(100 * effectiveCores, ((deltaJiffies * 10) / deltaMs) * 100).toFixed(2)
+        );
       }
+      state.lastCpuJiffies = totalJiffies;
+      state.lastSampleTimeMs = now;
     }
 
     state.cpuPercent = cpuPercent;
@@ -153,10 +216,10 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
       state.manualStop = true;
       appendLog(
         state.serverId,
-        'stderr',
-        `[cmnty Daemon] Memori (${memoryMb} MB) melebihi batas ${server.memoryLimitMb} MB. Menghentikan proses...`
+        'system',
+        `Memori (${memoryMb} MB) melebihi batas ${server.memoryLimitMb} MB. Menghentikan proses...`
       );
-      state.child.kill('SIGKILL');
+      killProcessTree(state.child, 'SIGKILL');
     }
 
     return { cpuPercent, memoryMb };
@@ -226,8 +289,22 @@ function buildSafeEnv(serverId: string): NodeJS.ProcessEnv {
   const pythonPath =
     server.runtime === 'python' && fs.existsSync(pyPackagesDir) ? pyPackagesDir : undefined;
 
+  const basePath =
+    process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+  const extraBinDirs: string[] = [];
+  if (server.runtime === 'nodejs') {
+    const nodeBin = path.join(cwd, 'node_modules', '.bin');
+    if (fs.existsSync(nodeBin)) extraBinDirs.push(nodeBin);
+  } else if (server.runtime === 'python') {
+    const venvBin = path.join(cwd, '.venv', 'bin');
+    if (fs.existsSync(venvBin)) extraBinDirs.push(venvBin);
+  }
+  const combinedPath = extraBinDirs.length
+    ? `${extraBinDirs.join(path.delimiter)}${path.delimiter}${basePath}`
+    : basePath;
+
   return {
-    PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    PATH: combinedPath,
     HOME: cwd,
     LANG: process.env.LANG || 'C.UTF-8',
     PYTHONUNBUFFERED: '1',
@@ -239,26 +316,55 @@ function buildSafeEnv(serverId: string): NodeJS.ProcessEnv {
   } as unknown as NodeJS.ProcessEnv;
 }
 
+function killProcessTree(
+  child: ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals
+): void {
+  const pid = child.pid;
+  if (pid && process.platform !== 'win32') {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // fallback to direct kill
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // ignore already exited
+  }
+}
+
 function runProcessCommand(
   serverId: string,
   cwd: string,
   executable: string,
   args: string[]
 ): Promise<void> {
+  const state = getOrCreateState(serverId);
   return new Promise<void>((resolve, reject) => {
     const child = spawn(executable, args, {
       cwd,
       env: buildSafeEnv(serverId),
       shell: false,
+      detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    state.installChild = child;
 
     child.stdout.on('data', (chunk: Buffer) => appendLog(serverId, 'stdout', chunk.toString('utf8')));
     child.stderr.on('data', (chunk: Buffer) => appendLog(serverId, 'stderr', chunk.toString('utf8')));
     child.on('error', (err) => {
+      if (state.installChild === child) state.installChild = null;
       reject(new Error(`Gagal menjalankan ${executable}: ${err.message}`));
     });
     child.on('close', (code) => {
+      if (state.installChild === child) state.installChild = null;
+      if (state.manualStop) {
+        reject(new Error('Instalasi dihentikan oleh pengguna.'));
+        return;
+      }
       if (code === 0) {
         resolve();
       } else {
@@ -293,7 +399,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       state.status = 'error';
       emitStatus(server.id);
       const msg = 'File package.json tidak valid (format JSON rusak).';
-      appendLog(server.id, 'stderr', `[cmnty Daemon] ${msg}`);
+      appendLog(server.id, 'system', msg);
       throw new Error(msg);
     }
 
@@ -315,7 +421,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       state.status = 'error';
       emitStatus(server.id);
       const msg = err instanceof Error ? err.message : 'Instalasi package.json gagal.';
-      appendLog(server.id, 'stderr', `[cmnty Daemon] ${msg}`);
+      appendLog(server.id, 'system', msg);
       throw new Error(msg);
     }
     return;
@@ -402,7 +508,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
     state.status = 'error';
     emitStatus(server.id);
     const msg = err instanceof Error ? err.message : 'Instalasi requirements.txt gagal.';
-    appendLog(server.id, 'stderr', `[cmnty Daemon] ${msg}`);
+    appendLog(server.id, 'system', msg);
     throw new Error(msg);
   }
 }
@@ -413,12 +519,22 @@ function resolvePythonExecutable(cwd: string, requestedExecutable: string): stri
     return venvBin;
   }
   const venvPy3 = path.join(cwd, '.venv', 'bin', 'python3');
-  if (fs.existsSync(venvPy3)) {
+  if (fs.existsSync(venvPy3) && (requestedExecutable === 'python' || requestedExecutable === 'python3')) {
     return venvPy3;
   }
   if (requestedExecutable === 'python' && !hasCommandOnSystem('python', ['--version'])) {
     if (hasCommandOnSystem('python3', ['--version'])) {
       return 'python3';
+    }
+  }
+  return requestedExecutable;
+}
+
+function resolveNodeExecutable(cwd: string, requestedExecutable: string): string {
+  if (requestedExecutable !== 'node' && requestedExecutable !== 'npm' && requestedExecutable !== 'npx') {
+    const localBin = path.join(cwd, 'node_modules', '.bin', requestedExecutable);
+    if (fs.existsSync(localBin)) {
+      return localBin;
     }
   }
   return requestedExecutable;
@@ -460,6 +576,8 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
       if (innerParsed.scriptArg) {
         verifyServerScriptFile(serverId, innerParsed.scriptArg);
       }
+    } else if (parsed.pythonModule) {
+      verifyServerPythonModule(serverId, parsed.pythonModule, parsed.args);
     } else if (parsed.scriptArg) {
       verifyServerScriptFile(serverId, parsed.scriptArg);
     }
@@ -467,7 +585,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
     state.status = 'error';
     emitStatus(serverId);
     const msg = err instanceof Error ? err.message : 'Script startup tidak valid.';
-    appendLog(serverId, 'stderr', `[cmnty Daemon] ${msg}`);
+    appendLog(serverId, 'system', msg);
     throw err;
   }
 
@@ -482,7 +600,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   const launchExecutable =
     server.runtime === 'python'
       ? resolvePythonExecutable(cwd, parsed.executable)
-      : parsed.executable;
+      : resolveNodeExecutable(cwd, parsed.executable);
 
   state.status = 'starting';
   emitStatus(serverId);
@@ -497,6 +615,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
     cwd,
     env: buildSafeEnv(serverId),
     shell: false,
+    detached: process.platform !== 'win32',
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
@@ -515,7 +634,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   });
 
   child.on('error', (err) => {
-    appendLog(serverId, 'stderr', `[cmnty Daemon] Gagal menjalankan proses: ${err.message}`);
+    appendLog(serverId, 'system', `Gagal menjalankan proses: ${err.message}`);
     state.status = 'error';
     state.child = null;
     state.pid = null;
@@ -546,7 +665,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
         const current = getOrCreateState(serverId);
         if (current.status === 'error' || current.status === 'stopped') {
           startServerProcess(serverId).catch((err) => {
-            appendLog(serverId, 'stderr', `[cmnty Daemon] Auto-restart gagal: ${err.message}`);
+            appendLog(serverId, 'system', `Auto-restart gagal: ${err.message}`);
           });
         }
       }, 2000);
@@ -558,6 +677,15 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
 
 export async function stopServerProcess(serverId: string, forceKill = false): Promise<ServerRuntimeMetrics> {
   const state = getOrCreateState(serverId);
+  if (state.installChild) {
+    state.manualStop = true;
+    killProcessTree(state.installChild, forceKill ? 'SIGKILL' : 'SIGTERM');
+    state.installChild = null;
+    state.status = 'stopped';
+    emitStatus(serverId);
+    return getServerMetrics(serverId);
+  }
+
   if (!state.child || !state.pid) {
     state.status = 'stopped';
     state.pid = null;
@@ -571,10 +699,10 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
 
   if (forceKill) {
     appendLog(serverId, 'system', 'Mengirim SIGKILL (Kill paksa)...');
-    child.kill('SIGKILL');
+    killProcessTree(child, 'SIGKILL');
   } else {
     appendLog(serverId, 'system', 'Mengirim SIGTERM (Menghentikan server secara aman)...');
-    child.kill('SIGTERM');
+    killProcessTree(child, 'SIGTERM');
   }
 
   await new Promise<void>((resolve) => {
@@ -585,7 +713,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
     const timer = setTimeout(() => {
       if (state.child) {
         appendLog(serverId, 'system', 'Timeout shutdown tercapai, mengirim SIGKILL...');
-        state.child.kill('SIGKILL');
+        killProcessTree(state.child, 'SIGKILL');
       }
       resolve();
     }, 3500);
@@ -609,11 +737,18 @@ export async function restartServerProcess(serverId: string): Promise<ServerRunt
 
 export function sendStdinToServer(serverId: string, input: string): void {
   const state = getOrCreateState(serverId);
-  if (!state.child || state.status !== 'running') {
+  const targetChild =
+    state.status === 'running' || state.status === 'starting'
+      ? state.child
+      : state.status === 'installing'
+      ? state.installChild
+      : null;
+
+  if (!targetChild || targetChild.stdin.destroyed) {
     throw new Error('Server tidak sedang berjalan. Start server terlebih dahulu untuk mengirim input.');
   }
   appendLog(serverId, 'stdin', `> ${input}`);
-  state.child.stdin.write(`${input}\n`);
+  targetChild.stdin.write(`${input}\n`);
 }
 
 function getSystemVersions(): { pythonVersion: string | null } {

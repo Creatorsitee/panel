@@ -32,7 +32,7 @@ export async function GET(
             encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
           );
         } catch {
-          closed = true;
+          cleanup?.();
         }
       };
 
@@ -73,6 +73,7 @@ export async function GET(
     headers: {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
     },
   });
@@ -93,8 +94,8 @@ export async function POST(
       return NextResponse.json({ ok: true });
     }
 
-    const command = String(body.command ?? '').trim();
-    if (!command) {
+    const command = typeof body.command === 'string' ? body.command : String(body.command ?? '');
+    if (!command.trim()) {
       return NextResponse.json({ error: 'Perintah tidak boleh kosong.' }, { status: 400 });
     }
 

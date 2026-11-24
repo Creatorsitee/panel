@@ -194,7 +194,13 @@ export function listServerFiles(serverId: string, relDir = ''): FileEntry[] {
   const results: FileEntry[] = [];
 
   for (const entry of entries) {
-    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '__pycache__' || entry.name === '.venv') {
+    if (
+      entry.name === 'node_modules' ||
+      entry.name === '.git' ||
+      entry.name === '__pycache__' ||
+      entry.name === '.venv' ||
+      entry.name === '.py_packages'
+    ) {
       results.push({
         name: entry.name,
         path: relDir ? `${relDir.replace(/\/+$/, '')}/${entry.name}` : entry.name,
@@ -206,7 +212,16 @@ export function listServerFiles(serverId: string, relDir = ''): FileEntry[] {
     }
 
     const fullPath = path.join(targetDir, entry.name);
-    const entryStat = fs.statSync(fullPath);
+    let entryStat: fs.Stats;
+    try {
+      entryStat = fs.statSync(fullPath);
+    } catch {
+      try {
+        entryStat = fs.lstatSync(fullPath);
+      } catch {
+        continue;
+      }
+    }
     const relPath = relDir ? `${relDir.replace(/\/+$/, '')}/${entry.name}` : entry.name;
 
     results.push({
@@ -246,7 +261,12 @@ export function readServerFile(serverId: string, relPath: string): { content: st
   };
 }
 
-export function writeServerFile(serverId: string, relPath: string, content: string): void {
+export function writeServerFile(
+  serverId: string,
+  relPath: string,
+  content: string,
+  encoding: 'utf8' | 'base64' = 'utf8'
+): void {
   const baseDir = ensureServerDir(serverId);
   const target = resolveSafePath(baseDir, relPath);
   assertRealContainment(baseDir, target);
@@ -255,7 +275,11 @@ export function writeServerFile(serverId: string, relPath: string, content: stri
   if (!fs.existsSync(parent)) {
     fs.mkdirSync(parent, { recursive: true });
   }
-  fs.writeFileSync(target, content, 'utf8');
+  if (encoding === 'base64') {
+    fs.writeFileSync(target, Buffer.from(content, 'base64'));
+  } else {
+    fs.writeFileSync(target, content, 'utf8');
+  }
 }
 
 export function createServerEntry(serverId: string, relPath: string, type: 'file' | 'directory'): void {
@@ -325,7 +349,29 @@ export function extractZipFile(serverId: string, relPath: string): void {
 
   const zip = new AdmZip(target);
   const parentDir = path.dirname(target);
-  zip.extractAllTo(parentDir, true);
+  const entries = zip.getEntries();
+
+  for (const entry of entries) {
+    const entryName = entry.entryName.replace(/\\/g, '/');
+    if (!entryName || entryName === '.' || entryName === './') continue;
+
+    const destPath = resolveSafePath(parentDir, entryName);
+    resolveSafePath(baseDir, path.relative(baseDir, destPath));
+    assertRealContainment(baseDir, destPath);
+
+    if (entry.isDirectory) {
+      if (!fs.existsSync(destPath)) {
+        fs.mkdirSync(destPath, { recursive: true });
+      }
+      continue;
+    }
+
+    const destParent = path.dirname(destPath);
+    if (!fs.existsSync(destParent)) {
+      fs.mkdirSync(destParent, { recursive: true });
+    }
+    fs.writeFileSync(destPath, entry.getData());
+  }
 }
 
 export function moveServerEntry(serverId: string, oldRelPath: string, newRelPath: string): void {

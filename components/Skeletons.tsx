@@ -19,11 +19,11 @@ export function HostStatsSkeleton() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {[0, 1, 2, 3].map((idx) => (
-          <div key={idx} className="space-y-2">
-            <ShimmerBlock className="h-3 w-20" />
-            <ShimmerBlock className="h-4 w-32" />
+          <div key={idx} className="space-y-2 min-w-0">
+            <ShimmerBlock className="h-3 w-20 max-w-full" />
+            <ShimmerBlock className="h-4 w-32 max-w-full" />
           </div>
         ))}
       </div>
@@ -70,7 +70,7 @@ export function DashboardContentSkeleton() {
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3" aria-hidden="true">
         <ShimmerBlock className="h-9 w-full max-w-sm rounded" />
-        <ShimmerBlock className="h-9 w-64 rounded" />
+        <ShimmerBlock className="h-9 w-full sm:w-64 rounded" />
       </div>
 
       <ServerCardsSkeleton count={6} />
@@ -119,14 +119,14 @@ export function WorkspaceBootSkeleton() {
       {/* Main Content Skeleton */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header
-          className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-5 flex items-center justify-between gap-4"
+          className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 flex items-center justify-between gap-3 sm:gap-4"
           aria-hidden="true"
         >
-          <ShimmerBlock className="h-4 w-40" />
-          <ShimmerBlock className="h-8 w-28 rounded" />
+          <ShimmerBlock className="h-4 w-32 sm:w-40" />
+          <ShimmerBlock className="h-8 w-24 sm:w-28 rounded" />
         </header>
 
-        <main className="flex-1 p-6 max-w-6xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
           <DashboardContentSkeleton />
         </main>
       </div>
@@ -161,14 +161,14 @@ export function FileManagerSkeleton() {
       {nameWidths.map((w, idx) => (
         <div
           key={idx}
-          className="px-4 py-3 flex items-center justify-between gap-3"
+          className="px-3 sm:px-4 py-3 flex items-center justify-between gap-3"
           aria-hidden="true"
         >
-          <div className="flex items-center gap-2.5 flex-1">
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
             <ShimmerBlock className="w-4 h-4 rounded-sm shrink-0" />
-            <ShimmerBlock className={`h-3.5 ${w}`} />
+            <ShimmerBlock className={`h-3.5 ${w} max-w-full`} />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <ShimmerBlock className="h-3 w-12" />
             <ShimmerBlock className="w-7 h-7 rounded" />
           </div>
@@ -195,7 +195,7 @@ export function FileEditorSkeleton() {
   ];
   return (
     <div
-      className="p-4 space-y-3 min-h-[520px] bg-[#09090B]"
+      className="p-3 sm:p-4 space-y-3 min-h-[380px] sm:min-h-[520px] bg-[#09090B]"
       role="status"
       aria-label="Membuka isi file"
     >

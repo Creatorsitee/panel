@@ -10,7 +10,7 @@ import {
   validateServerName,
   validateServerPort,
   allocateNextPort,
-} from './security';
+} from './security.ts';
 
 test('resolveSafePath allows paths strictly inside base directory', () => {
   const base = '/tmp/cmnty-test/server-1';
@@ -43,6 +43,13 @@ test('parseSafeStartupCommand accepts allowed per-runtime Node.js and Python com
   assert.deepEqual(parseSafeStartupCommand('npx tsx src/index.ts', 'nodejs'), {
     executable: 'npx',
     args: ['tsx', 'src/index.ts'],
+    scriptArg: 'src/index.ts',
+    pythonModule: null,
+    npmScriptName: null,
+  });
+  assert.deepEqual(parseSafeStartupCommand('tsx watch src/index.ts', 'nodejs'), {
+    executable: 'tsx',
+    args: ['watch', 'src/index.ts'],
     scriptArg: 'src/index.ts',
     pythonModule: null,
     npmScriptName: null,

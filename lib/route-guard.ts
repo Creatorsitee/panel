@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractSessionFromRequest, type SessionPayload } from './auth';
-import { getServerById } from './db';
-import type { ServerConfig } from './types';
+import { getServerById, getUserById } from './db';
+import type { ServerConfig, UserRecord } from './types';
 
 export function requireAuth(
   req: NextRequest
@@ -18,6 +18,38 @@ export function requireAuth(
   return { session };
 }
 
+export function requireAdmin(
+  req: NextRequest
+):
+  | { session: SessionPayload; user: UserRecord; error?: never }
+  | { session?: never; user?: never; error: NextResponse } {
+  const authResult = requireAuth(req);
+  if (authResult.error) {
+    return { error: authResult.error };
+  }
+
+  const user = getUserById(authResult.session.userId);
+  if (!user) {
+    return {
+      error: NextResponse.json(
+        { error: 'Akun tidak ditemukan atau telah dihapus.' },
+        { status: 401 }
+      ),
+    };
+  }
+
+  if (user.role !== 'admin') {
+    return {
+      error: NextResponse.json(
+        { error: 'Akses ditolak. Fitur ini khusus administrator.' },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { session: authResult.session, user };
+}
+
 export function requireServerAccess(
   req: NextRequest,
   serverId: string
@@ -29,6 +61,16 @@ export function requireServerAccess(
     return { error: authResult.error };
   }
 
+  const user = getUserById(authResult.session.userId);
+  if (!user) {
+    return {
+      error: NextResponse.json(
+        { error: 'Akun tidak ditemukan atau telah dihapus.' },
+        { status: 401 }
+      ),
+    };
+  }
+
   const server = getServerById(serverId);
   if (!server) {
     return {
@@ -36,7 +78,7 @@ export function requireServerAccess(
     };
   }
 
-  if (authResult.session.role !== 'admin' && server.ownerId !== authResult.session.userId) {
+  if (user.role !== 'admin' && server.ownerId !== user.id) {
     return {
       error: NextResponse.json(
         { error: 'Anda tidak memiliki izin untuk mengakses server ini.' },

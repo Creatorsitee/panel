@@ -11,7 +11,7 @@ import {
   getPerServerMaxMemoryMb,
   getVpsCpuOptions,
   getVpsMemoryOptions,
-} from './vps-specs';
+} from './vps-specs.ts';
 
 test('formatCpuLabel and formatMemoryLabel format fractional and gigabyte values cleanly', () => {
   assert.equal(formatCpuLabel(10), '10% (0.1 Cores)');

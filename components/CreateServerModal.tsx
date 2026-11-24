@@ -29,7 +29,6 @@ export default function CreateServerModal({
   const [description, setDescription] = useState('');
   const [runtime, setRuntime] = useState<ServerRuntime>('nodejs');
   const [startupCommand, setStartupCommand] = useState('node index.js');
-  const [customPort, setCustomPort] = useState('');
   const [selectedMemoryMb, setSelectedMemoryMb] = useState<number | null>(null);
   const [selectedCpuPercent, setSelectedCpuPercent] = useState<number | null>(null);
   const [autoRestart, setAutoRestart] = useState(false);
@@ -79,7 +78,6 @@ export default function CreateServerModal({
     }
     setSubmitting(true);
     try {
-      const parsedPort = customPort.trim() ? Number(customPort.trim()) : undefined;
       const res = await apiFetch<{ server: ServerWithMetrics }>(
         '/api/servers',
         {
@@ -89,7 +87,6 @@ export default function CreateServerModal({
             description,
             runtime,
             startupCommand,
-            ...(parsedPort !== undefined ? { port: parsedPort } : {}),
             memoryLimitMb,
             cpuLimitPercent,
             autoRestart,
@@ -100,13 +97,12 @@ export default function CreateServerModal({
       setDescription('');
       setRuntime('nodejs');
       setStartupCommand('node index.js');
-      setCustomPort('');
       setSelectedMemoryMb(null);
       setSelectedCpuPercent(null);
       setAutoRestart(false);
       void showSuccessToast(
         'Server berhasil dibuat',
-        `${res.server.name} siap pada Port :${res.server.port}`
+        `${res.server.name} siap digunakan`
       );
       onCreated(res.server);
       onClose();
@@ -128,7 +124,7 @@ export default function CreateServerModal({
       aria-labelledby="create-server-title"
     >
       <div className="w-full max-w-xl bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden max-h-[92vh] flex flex-col">
-        <div className="px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
           <h2 id="create-server-title" className="text-sm font-semibold">
             Buat Server
           </h2>
@@ -142,7 +138,7 @@ export default function CreateServerModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label
@@ -195,43 +191,22 @@ export default function CreateServerModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label
-                htmlFor="srv-startup"
-                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
-              >
-                Perintah Startup
-              </label>
-              <input
-                id="srv-startup"
-                type="text"
-                required
-                value={startupCommand}
-                onChange={(e) => setStartupCommand(e.target.value)}
-                placeholder={runtime === 'nodejs' ? 'node index.js' : 'python3 -u main.py'}
-                className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label
-                htmlFor="srv-port"
-                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
-              >
-                Port Internal (Opsional)
-              </label>
-              <input
-                id="srv-port"
-                type="number"
-                min={1024}
-                max={65535}
-                value={customPort}
-                onChange={(e) => setCustomPort(e.target.value)}
-                placeholder="Otomatis (mis. 8080)"
-                className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
-              />
-            </div>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="srv-startup"
+              className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Perintah Startup
+            </label>
+            <input
+              id="srv-startup"
+              type="text"
+              required
+              value={startupCommand}
+              onChange={(e) => setStartupCommand(e.target.value)}
+              placeholder={runtime === 'nodejs' ? 'node index.js' : 'python3 -u main.py'}
+              className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -251,11 +226,11 @@ export default function CreateServerModal({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="space-y-1.5 min-w-0">
               <label
                 htmlFor="srv-mem"
-                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate"
               >
                 Memori
               </label>
@@ -264,7 +239,7 @@ export default function CreateServerModal({
                 value={memoryLimitMb}
                 disabled={memoryOptions.length === 0}
                 onChange={(e) => setSelectedMemoryMb(Number(e.target.value))}
-                className="w-full h-9 px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400 disabled:opacity-50"
+                className="w-full h-9 px-2.5 sm:px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400 disabled:opacity-50"
               >
                 {memoryOptions.length === 0 ? (
                   <option value={0}>Memori tersedia habis</option>
@@ -278,10 +253,10 @@ export default function CreateServerModal({
               </select>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 min-w-0">
               <label
                 htmlFor="srv-cpu"
-                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate"
               >
                 Batas CPU
               </label>
@@ -290,7 +265,7 @@ export default function CreateServerModal({
                 value={cpuLimitPercent}
                 disabled={cpuOptions.length === 0}
                 onChange={(e) => setSelectedCpuPercent(Number(e.target.value))}
-                className="w-full h-9 px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400 disabled:opacity-50"
+                className="w-full h-9 px-2.5 sm:px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400 disabled:opacity-50"
               >
                 {cpuOptions.length === 0 ? (
                   <option value={0}>Batas CPU habis</option>

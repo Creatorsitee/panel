@@ -19,6 +19,15 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
   return headers;
 }
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 export async function apiFetch<T>(
   url: string,
   options: RequestInit = {}
@@ -43,7 +52,10 @@ export async function apiFetch<T>(
     : { error: await res.text() };
 
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
+    throw new ApiError(
+      (data as { error?: string }).error || `HTTP ${res.status}`,
+      res.status
+    );
   }
 
   return data as T;

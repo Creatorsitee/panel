@@ -13,6 +13,7 @@ import type { HostVpsInfo, ServerWithMetrics } from '@/lib/types';
 interface ServerSettingsTabProps {
   server: ServerWithMetrics;
   hostInfo: HostVpsInfo | null;
+  isAdmin: boolean;
   onUpdated: (server: ServerWithMetrics) => void;
   onDeleted: (serverId: string) => void;
 }
@@ -20,6 +21,7 @@ interface ServerSettingsTabProps {
 export default function ServerSettingsTab({
   server,
   hostInfo,
+  isAdmin,
   onUpdated,
   onDeleted,
 }: ServerSettingsTabProps) {
@@ -80,19 +82,35 @@ export default function ServerSettingsTab({
     return opts;
   }, [hostInfo, isServerActive, server.cpuLimitPercent]);
 
-  // Silent auto-save only when values actually differ from last saved state
+  const onUpdatedRef = useRef(onUpdated);
+  useEffect(() => {
+    onUpdatedRef.current = onUpdated;
+  }, [onUpdated]);
+
+  const trimmedPort = portInput.trim();
+  const parsedPort = trimmedPort ? Number(trimmedPort) : server.port;
+  const portError =
+    isAdmin &&
+    trimmedPort !== '' &&
+    (!Number.isInteger(parsedPort) || parsedPort < 1024 || parsedPort > 65535)
+      ? 'Port harus berupa angka antara 1024 hingga 65535.'
+      : null;
+
+  // Silent auto-save only when values are valid and actually differ from last saved state
   useEffect(() => {
     const saved = lastSavedRef.current;
-    const trimmedPort = portInput.trim();
-    const parsedPort = trimmedPort ? Number(trimmedPort) : saved.port;
-    const portValid =
-      Number.isInteger(parsedPort) && parsedPort >= 1024 && parsedPort <= 65535;
-    const portChanged = portValid && parsedPort !== saved.port;
+    const trimmedName = name.trim();
+    const trimmedCmd = startupCommand.trim();
+    if (trimmedName.length < 2 || trimmedCmd.length === 0 || portError) {
+      return;
+    }
+
+    const portChanged = isAdmin && trimmedPort !== '' && parsedPort !== saved.port;
 
     const isDirty =
-      name !== saved.name ||
+      trimmedName !== saved.name ||
       description !== saved.description ||
-      startupCommand !== saved.startupCommand ||
+      trimmedCmd !== saved.startupCommand ||
       autoRestart !== saved.autoRestart ||
       portChanged ||
       memoryLimitMb !== saved.memoryLimitMb ||
@@ -107,9 +125,9 @@ export default function ServerSettingsTab({
           {
             method: 'PATCH',
             body: JSON.stringify({
-              name,
+              name: trimmedName,
               description,
-              startupCommand,
+              startupCommand: trimmedCmd,
               autoRestart,
               ...(portChanged ? { port: parsedPort } : {}),
               memoryLimitMb,
@@ -126,7 +144,7 @@ export default function ServerSettingsTab({
           memoryLimitMb: res.server.memoryLimitMb,
           cpuLimitPercent: res.server.cpuLimitPercent,
         };
-        onUpdated(res.server);
+        onUpdatedRef.current(res.server);
         void showSuccessToast('Pengaturan tersimpan');
       } catch (err) {
         await showErrorAlert(
@@ -137,7 +155,7 @@ export default function ServerSettingsTab({
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [name, description, startupCommand, autoRestart, portInput, memoryLimitMb, cpuLimitPercent, server.id, onUpdated]);
+  }, [name, description, startupCommand, autoRestart, isAdmin, trimmedPort, parsedPort, portError, memoryLimitMb, cpuLimitPercent, server.id]);
 
   async function handleDelete() {
     const confirmed = await showConfirmDialog({
@@ -172,7 +190,7 @@ export default function ServerSettingsTab({
       </div>
 
       <div className="space-y-6">
-        <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 space-y-4">
+        <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 space-y-4">
           <div className="flex items-center gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
             <Terminal className="w-4 h-4 text-zinc-400" />
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
@@ -200,13 +218,13 @@ export default function ServerSettingsTab({
               type="checkbox"
               checked={autoRestart}
               onChange={(e) => setAutoRestart(e.target.checked)}
-              className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-900 dark:accent-zinc-100"
+              className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-900 dark:accent-zinc-100 shrink-0"
             />
             <span>Auto-restart otomatis saat proses berhenti</span>
           </label>
         </div>
 
-        <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 space-y-4">
+        <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
               Detail &amp; Alokasi Resource
@@ -242,40 +260,42 @@ export default function ServerSettingsTab({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="srv-mem" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                Alokasi Memori
-              </label>
-              <select
-                id="srv-mem"
-                value={memoryLimitMb}
-                onChange={(e) => setMemoryLimitMb(Number(e.target.value))}
-                className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
-              >
-                {memoryOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <div className="sm:col-span-2 grid grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 min-w-0">
+                <label htmlFor="srv-mem" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
+                  Alokasi Memori
+                </label>
+                <select
+                  id="srv-mem"
+                  value={memoryLimitMb}
+                  onChange={(e) => setMemoryLimitMb(Number(e.target.value))}
+                  className="w-full h-9 px-2.5 sm:px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
+                >
+                  {memoryOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="srv-cpu" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                Batas CPU
-              </label>
-              <select
-                id="srv-cpu"
-                value={cpuLimitPercent}
-                onChange={(e) => setCpuLimitPercent(Number(e.target.value))}
-                className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
-              >
-                {cpuOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-1.5 min-w-0">
+                <label htmlFor="srv-cpu" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
+                  Batas CPU
+                </label>
+                <select
+                  id="srv-cpu"
+                  value={cpuLimitPercent}
+                  onChange={(e) => setCpuLimitPercent(Number(e.target.value))}
+                  className="w-full h-9 px-2.5 sm:px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
+                >
+                  {cpuOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">
@@ -287,17 +307,28 @@ export default function ServerSettingsTab({
                 type="number"
                 min={1024}
                 max={65535}
-                value={portInput}
-                onChange={(e) => setPortInput(e.target.value)}
-                className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
+                value={isAdmin ? portInput : String(server.port)}
+                readOnly={!isAdmin}
+                aria-readonly={!isAdmin}
+                onChange={(e) => {
+                  if (isAdmin) setPortInput(e.target.value);
+                }}
+                className={
+                  isAdmin
+                    ? 'w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500'
+                    : 'w-full h-9 px-3 rounded bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-500 dark:text-zinc-400 cursor-default focus:outline-none'
+                }
               />
+              {isAdmin && portError && (
+                <p className="text-[11px] text-red-500">{portError}</p>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* Danger Zone */}
-      <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-5 space-y-4">
+      <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 sm:p-5 space-y-4">
         <div className="flex items-center gap-2 pb-3 border-b border-red-500/20">
           <ShieldAlert className="w-4 h-4 text-red-500" />
           <h3 className="text-xs font-semibold uppercase tracking-wider text-red-600 dark:text-red-400">

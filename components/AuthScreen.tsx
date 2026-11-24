@@ -58,8 +58,8 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
             {mode === 'login'
-              ? 'Kelola server Node.js atau Python Anda secara mandiri.'
-              : 'Daftar untuk membuat dan menjalankan server Node.js & Python self host.'}
+              ? 'Masuk untuk mengelola instance, konsol, dan metrik server Anda.'
+              : 'Buat akun untuk mengelola deployment dan runtime server Anda.'}
           </p>
         </div>
 

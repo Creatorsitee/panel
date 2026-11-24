@@ -247,7 +247,11 @@ export function parseSafeStartupCommand(command: string, expectedRuntime?: Serve
   }
 
   // Remaining Node binaries: node, tsx, ts-node, nodemon
-  const scriptArg = args.find((a) => !a.startsWith('-')) || null;
+  const positionalNodeArgs = args.filter((a) => !a.startsWith('-'));
+  const scriptArg =
+    executable === 'tsx' && positionalNodeArgs[0] === 'watch'
+      ? positionalNodeArgs[1] || null
+      : positionalNodeArgs[0] || null;
   if (!scriptArg) {
     throw new Error(`Tentukan file script di direktori server (mis. ${executable} index.js).`);
   }

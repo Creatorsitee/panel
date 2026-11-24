@@ -50,12 +50,18 @@ export async function POST(
       action: 'write' | 'create' | 'rename' | 'extract' | 'move';
       path: string;
       content?: string;
+      encoding?: 'utf8' | 'base64';
       entryType?: 'file' | 'directory';
       newPath?: string;
     };
 
     if (body.action === 'write') {
-      writeServerFile(id, body.path, body.content ?? '');
+      writeServerFile(
+        id,
+        body.path,
+        body.content ?? '',
+        body.encoding === 'base64' ? 'base64' : 'utf8'
+      );
       return NextResponse.json({ ok: true });
     }
 

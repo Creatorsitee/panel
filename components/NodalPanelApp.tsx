@@ -13,11 +13,13 @@ import {
   Search,
   Server,
   Settings,
+  Shield,
   Sun,
   Terminal,
   X,
 } from 'lucide-react';
-import { apiFetch, setAuthToken } from './api-client';
+import { ApiError, apiFetch, setAuthToken } from './api-client';
+import AdminPanelTab from './AdminPanelTab';
 import AuthScreen from './AuthScreen';
 import CreateServerModal from './CreateServerModal';
 import ServerConsoleTab from './ServerConsoleTab';
@@ -82,6 +84,7 @@ export default function NodalPanelApp() {
 
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [serverTab, setServerTab] = useState<ServerTab>('console');
+  const [viewMode, setViewMode] = useState<'servers' | 'admin'>('servers');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [runtimeFilter, setRuntimeFilter] = useState<'all' | 'nodejs' | 'python'>('all');
@@ -101,8 +104,13 @@ export default function NodalPanelApp() {
       ]);
       setServers(srvRes.servers);
       setHostInfo(hostRes.host);
-    } catch {
-      // ignore transient error
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthToken(null);
+        setUser(null);
+        setServers([]);
+        setActiveServerId(null);
+      }
     } finally {
       setLoadingData(false);
     }
@@ -174,6 +182,7 @@ export default function NodalPanelApp() {
     setUser(null);
     setServers([]);
     setActiveServerId(null);
+    setViewMode('servers');
     void showInfoToast('Berhasil keluar');
   }
 
@@ -208,18 +217,22 @@ export default function NodalPanelApp() {
     []
   );
 
-  function handleServerUpdated(updated: ServerWithMetrics) {
-    setServers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-    void loadWorkspaceData();
-  }
+  const handleServerUpdated = useCallback(
+    (updated: ServerWithMetrics) => {
+      setServers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      void loadWorkspaceData();
+    },
+    [loadWorkspaceData]
+  );
 
-  function handleServerDeleted(serverId: string) {
-    setServers((prev) => prev.filter((s) => s.id !== serverId));
-    if (activeServerId === serverId) {
-      setActiveServerId(null);
-    }
-    void loadWorkspaceData();
-  }
+  const handleServerDeleted = useCallback(
+    (serverId: string) => {
+      setServers((prev) => prev.filter((s) => s.id !== serverId));
+      setActiveServerId((prev) => (prev === serverId ? null : prev));
+      void loadWorkspaceData();
+    },
+    [loadWorkspaceData]
+  );
 
   function openCreateModal() {
     setCreateOpen(true);
@@ -262,7 +275,7 @@ export default function NodalPanelApp() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-60 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-transform duration-150 ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-60 shrink-0 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-transform duration-150 ${
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -271,6 +284,7 @@ export default function NodalPanelApp() {
             type="button"
             onClick={() => {
               setActiveServerId(null);
+              setViewMode('servers');
               setMobileNavOpen(false);
             }}
             className="text-sm font-bold tracking-tight uppercase cursor-pointer"
@@ -297,10 +311,11 @@ export default function NodalPanelApp() {
               type="button"
               onClick={() => {
                 setActiveServerId(null);
+                setViewMode('servers');
                 setMobileNavOpen(false);
               }}
               className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors cursor-pointer ${
-                !activeServer
+                !activeServer && viewMode === 'servers'
                   ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
                   : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
               }`}
@@ -308,6 +323,25 @@ export default function NodalPanelApp() {
               <Server className="w-4 h-4 shrink-0" />
               <span>Daftar Server</span>
             </button>
+
+            {user.role === 'admin' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveServerId(null);
+                  setViewMode('admin');
+                  setMobileNavOpen(false);
+                }}
+                className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors cursor-pointer ${
+                  !activeServer && viewMode === 'admin'
+                    ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                <Shield className="w-4 h-4 shrink-0" />
+                <span>Panel Admin</span>
+              </button>
+            )}
           </div>
 
           {activeServer && (
@@ -379,7 +413,14 @@ export default function NodalPanelApp() {
 
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="min-w-0">
-              <div className="text-xs font-semibold truncate">{user.name}</div>
+              <div className="text-xs font-semibold truncate flex items-center gap-1.5">
+                <span className="truncate">{user.name}</span>
+                {user.role === 'admin' && (
+                  <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
+                    admin
+                  </span>
+                )}
+              </div>
               <div className="text-[11px] text-zinc-500 truncate font-mono">
                 {user.email}
               </div>
@@ -399,40 +440,45 @@ export default function NodalPanelApp() {
 
       {/* Main Content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 flex items-center justify-between gap-3 sm:gap-4">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Buka menu"
-              className="lg:hidden w-8 h-8 rounded flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="lg:hidden w-8 h-8 rounded flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
             >
               <Menu className="w-4 h-4" />
             </button>
 
-            <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs min-w-0">
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 sm:gap-2 text-xs min-w-0">
               <button
                 type="button"
                 onClick={() => {
                   setActiveServerId(null);
+                  setViewMode('servers');
                 }}
-                className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors cursor-pointer whitespace-nowrap"
+                className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 Panel
               </button>
-              <span className="text-zinc-400">/</span>
+              <span className="text-zinc-400 shrink-0">/</span>
               {activeServer ? (
                 <>
-                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 truncate max-w-[160px] sm:max-w-xs">
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 truncate max-w-[110px] sm:max-w-xs">
                     {activeServer.name}
                   </span>
-                  <span className="text-zinc-400">/</span>
-                  <span className="text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
+                  <span className="text-zinc-400 shrink-0">/</span>
+                  <span className="text-zinc-600 dark:text-zinc-400 whitespace-nowrap truncate">
                     {activeTabLabel}
                   </span>
                 </>
+              ) : viewMode === 'admin' && user.role === 'admin' ? (
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
+                  Panel Admin
+                </span>
               ) : (
-                <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
                   Daftar Server
                 </span>
               )}
@@ -464,17 +510,17 @@ export default function NodalPanelApp() {
           </div>
         </header>
 
-        <main className="flex-1 p-6 max-w-6xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
           {activeServer ? (
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800">
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center gap-2 text-xs font-mono text-zinc-500">
                     <span className="uppercase">{activeServer.runtime}</span>
                     <span>·</span>
                     <span>Port :{activeServer.port}</span>
                   </div>
-                  <h1 className="text-xl font-bold tracking-tight mt-0.5 text-zinc-900 dark:text-zinc-100">
+                  <h1 className="text-lg sm:text-xl font-bold tracking-tight mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
                     {activeServer.name}
                   </h1>
                 </div>
@@ -512,44 +558,58 @@ export default function NodalPanelApp() {
                   key={activeServer.id}
                   server={activeServer}
                   hostInfo={hostInfo}
+                  isAdmin={user.role === 'admin'}
                   onUpdated={handleServerUpdated}
                   onDeleted={handleServerDeleted}
                 />
               )}
             </div>
+          ) : viewMode === 'admin' && user.role === 'admin' ? (
+            <AdminPanelTab
+              currentUser={user}
+              onOpenServer={(serverId) => {
+                setActiveServerId(serverId);
+                setServerTab('console');
+                setViewMode('servers');
+                void loadWorkspaceData();
+              }}
+              onWorkspaceRefresh={() => {
+                void loadWorkspaceData();
+              }}
+            />
           ) : loadingData && servers.length === 0 ? (
             <DashboardContentSkeleton />
           ) : (
             <div className="space-y-6">
               {/* Host VPS Stats Bar */}
-              <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
+              <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4">
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-200 dark:border-zinc-800">
                   <div className="flex items-center gap-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider">
-                    <Cpu className="w-4 h-4 text-zinc-500" />
+                    <Cpu className="w-4 h-4 text-zinc-500 shrink-0" />
                     <span>Resource VPS Host</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                  <div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-xs">
+                  <div className="min-w-0">
                     <div className="text-zinc-500 text-[11px]">Hostname</div>
                     <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
                       {hostInfo ? hostInfo.hostname : '—'}
                     </div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-zinc-500 text-[11px]">CPU &amp; Load</div>
-                    <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5">
+                    <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
                       {hostInfo ? `${hostInfo.cpuCores} Cores (Load ${hostInfo.loadAvg[0]})` : '—'}
                     </div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-zinc-500 text-[11px]">Memori Terpakai</div>
-                    <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5">
+                    <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
                       {hostInfo ? `${hostInfo.usedMemoryMb} / ${hostInfo.totalMemoryMb} MB` : '—'}
                     </div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-zinc-500 text-[11px]">Runtime Aktif</div>
                     <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
                       {hostInfo ? `Node ${hostInfo.nodeVersion} · Py ${hostInfo.pythonVersion || '—'}` : '—'}
@@ -560,7 +620,7 @@ export default function NodalPanelApp() {
 
               {/* Search & Filter Toolbar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-sm">
+                <div className="relative flex-1 sm:max-w-sm">
                   <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="search"
@@ -573,7 +633,7 @@ export default function NodalPanelApp() {
                 </div>
 
                 <div
-                  className="inline-flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded"
+                  className="w-full sm:w-auto flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded"
                   role="group"
                   aria-label="Filter runtime server"
                 >
@@ -582,7 +642,7 @@ export default function NodalPanelApp() {
                       key={item}
                       type="button"
                       onClick={() => setRuntimeFilter(item)}
-                      className={`h-7 px-3 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                      className={`flex-1 sm:flex-initial h-7 px-2.5 sm:px-3 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap text-center ${
                         runtimeFilter === item
                           ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
                           : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
@@ -649,10 +709,10 @@ export default function NodalPanelApp() {
                         }}
                         className="group bg-zinc-50/80 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 rounded-lg p-4 flex flex-col justify-between transition-all cursor-pointer shadow-xs hover:shadow-md"
                       >
-                        <div className="space-y-3">
+                        <div className="space-y-3 min-w-0">
                           <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div className="text-[11px] font-mono text-zinc-500 uppercase">
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-mono text-zinc-500 uppercase truncate">
                                 {srv.runtime === 'nodejs' ? 'Node.js' : 'Python'} · :{srv.port}
                               </div>
                               <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 group-hover:text-zinc-950 dark:group-hover:text-white mt-0.5 truncate">
@@ -660,11 +720,8 @@ export default function NodalPanelApp() {
                               </h3>
                             </div>
                             <span
-                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium border shrink-0 ${statusBadgeClass}`}
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border shrink-0 ${statusBadgeClass}`}
                             >
-                              {srv.metrics.status === 'running' && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              )}
                               <span>{statusText}</span>
                             </span>
                           </div>
@@ -674,13 +731,13 @@ export default function NodalPanelApp() {
                           </div>
                         </div>
 
-                        <div className="pt-4 mt-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs">
-                          <div className="font-mono text-zinc-500 text-[11px] space-x-2">
+                        <div className="pt-4 mt-4 border-t border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="font-mono text-zinc-500 text-[11px] flex items-center gap-2 min-w-0">
                             <span>CPU: {srv.metrics.cpuPercent.toFixed(1)}%</span>
                             <span>·</span>
                             <span>RAM: {srv.metrics.memoryMb.toFixed(1)}MB</span>
                           </div>
-                          <span className="font-medium text-zinc-900 dark:text-zinc-100 group-hover:underline text-xs">
+                          <span className="font-medium text-zinc-900 dark:text-zinc-100 group-hover:underline text-xs shrink-0">
                             Kelola &rarr;
                           </span>
                         </div>

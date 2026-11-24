@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteServerRecord, listAllServers, updateServerRecord } from '@/lib/db';
+import { deleteServerRecord, getUserById, listAllServers, updateServerRecord } from '@/lib/db';
 import { updateServerDotEnvPort } from '@/lib/file-manager';
 import { getHostVpsInfo, getServerMetrics, stopServerProcess } from '@/lib/process-manager';
 import { requireServerAccess } from '@/lib/route-guard';
@@ -41,6 +41,7 @@ export async function PATCH(
 
   try {
     const body = (await req.json()) as {
+      ownerId?: string;
       name?: string;
       description?: string;
       startupCommand?: string;
@@ -74,7 +75,21 @@ export async function PATCH(
     );
 
     const patch: Parameters<typeof updateServerRecord>[1] = {};
+    const actor = getUserById(access.session.userId);
 
+    if (body.ownerId !== undefined) {
+      if (!actor || actor.role !== 'admin') {
+        return NextResponse.json(
+          { error: 'Hanya administrator yang dapat memindahkan kepemilikan server.' },
+          { status: 403 }
+        );
+      }
+      const targetUser = getUserById(body.ownerId);
+      if (!targetUser) {
+        return NextResponse.json({ error: 'User pemilik baru tidak ditemukan.' }, { status: 400 });
+      }
+      patch.ownerId = targetUser.id;
+    }
     if (body.name !== undefined) {
       patch.name = validateServerName(body.name);
     }
@@ -91,6 +106,12 @@ export async function PATCH(
         .map((s) => s.port);
       const nextPort = validateServerPort(body.port, usedPorts);
       if (nextPort !== access.server.port) {
+        if (!actor || actor.role !== 'admin') {
+          return NextResponse.json(
+            { error: 'Anda tidak memiliki izin untuk mengubah port server.' },
+            { status: 403 }
+          );
+        }
         patch.port = nextPort;
       }
     }

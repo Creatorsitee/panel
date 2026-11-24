@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import type { ServerConfig, UserRecord } from './types';
+import type { ServerConfig, UserRecord, UserRole } from './types';
 
 interface DatabaseState {
   users: UserRecord[];
@@ -90,6 +90,10 @@ export function getUserCount(): number {
   return readDbSync().users.length;
 }
 
+export function listAllUsers(): UserRecord[] {
+  return readDbSync().users;
+}
+
 export async function createUser(input: {
   name: string;
   email: string;
@@ -113,6 +117,87 @@ export async function createUser(input: {
     db.users.push(user);
     writeDbSync(db);
     return user;
+  });
+}
+
+export async function createUserByAdmin(input: {
+  name: string;
+  email: string;
+  passwordHash: string;
+  role: UserRole;
+}): Promise<UserRecord> {
+  return withWriteLock(() => {
+    const db = readDbSync();
+    if (db.users.some((u) => u.email.toLowerCase() === input.email.toLowerCase())) {
+      throw new Error('Email sudah terdaftar.');
+    }
+
+    const user: UserRecord = {
+      id: `usr_${crypto.randomBytes(6).toString('hex')}`,
+      name: input.name,
+      email: input.email.toLowerCase(),
+      passwordHash: input.passwordHash,
+      role: input.role,
+      createdAt: new Date().toISOString(),
+    };
+    db.users.push(user);
+    writeDbSync(db);
+    return user;
+  });
+}
+
+export async function updateUserRecord(
+  userId: string,
+  patch: Partial<Pick<UserRecord, 'name' | 'email' | 'role' | 'passwordHash'>>
+): Promise<UserRecord> {
+  return withWriteLock(() => {
+    const db = readDbSync();
+    const idx = db.users.findIndex((u) => u.id === userId);
+    if (idx === -1) {
+      throw new Error('User tidak ditemukan.');
+    }
+
+    if (patch.email) {
+      const normalized = patch.email.toLowerCase();
+      if (db.users.some((u) => u.id !== userId && u.email.toLowerCase() === normalized)) {
+        throw new Error('Email sudah digunakan oleh akun lain.');
+      }
+    }
+
+    const current = db.users[idx];
+    if (current.role === 'admin' && patch.role === 'user') {
+      const adminCount = db.users.filter((u) => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        throw new Error('Minimal harus ada satu admin aktif di sistem.');
+      }
+    }
+
+    const updated: UserRecord = {
+      ...current,
+      ...patch,
+      email: patch.email ? patch.email.toLowerCase() : current.email,
+    };
+    db.users[idx] = updated;
+    writeDbSync(db);
+    return updated;
+  });
+}
+
+export async function deleteUserRecord(userId: string): Promise<void> {
+  return withWriteLock(() => {
+    const db = readDbSync();
+    const target = db.users.find((u) => u.id === userId);
+    if (!target) {
+      throw new Error('User tidak ditemukan.');
+    }
+    if (target.role === 'admin') {
+      const adminCount = db.users.filter((u) => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        throw new Error('Tidak dapat menghapus satu-satunya akun admin.');
+      }
+    }
+    db.users = db.users.filter((u) => u.id !== userId);
+    writeDbSync(db);
   });
 }
 
@@ -160,6 +245,7 @@ export async function updateServerRecord(
   patch: Partial<
     Pick<
       ServerConfig,
+      | 'ownerId'
       | 'name'
       | 'description'
       | 'startupCommand'

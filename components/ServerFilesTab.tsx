@@ -132,6 +132,20 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     };
   }, [serverId]);
 
+  useEffect(() => {
+    if (!activeMenuPath) return;
+    const handleOutside = () => setActiveMenuPath(null);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveMenuPath(null);
+    };
+    window.addEventListener('click', handleOutside);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('click', handleOutside);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [activeMenuPath]);
+
   async function openFile(filePath: string) {
     if (!isEditableFile(filePath)) {
       await showWarningAlert(
@@ -295,6 +309,17 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     }
   }
 
+  async function fileToBase64(file: File): Promise<string> {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
   async function handleUploadFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
@@ -306,7 +331,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         if (file.size > 2 * 1024 * 1024) {
           throw new Error(`File "${file.name}" melebihi batas 2 MB.`);
         }
-        const content = await file.text();
+        const content = await fileToBase64(file);
         const targetPath = currentDir ? `${currentDir}/${file.name}` : file.name;
         await apiFetch(`/api/servers/${serverId}/files`, {
           method: 'POST',
@@ -314,6 +339,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             action: 'write',
             path: targetPath,
             content,
+            encoding: 'base64',
           }),
         });
         uploadedCount += 1;
@@ -343,21 +369,21 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-10">
       {/* File Manager Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs font-mono">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+        <div className="flex items-center gap-2 text-xs font-mono min-w-0 flex-1">
           <button
             type="button"
             disabled={!currentDir}
             onClick={navigateUp}
-            className="h-7 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 inline-flex items-center gap-1 cursor-pointer"
+            className="h-7 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 inline-flex items-center gap-1 cursor-pointer shrink-0"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
             <span>Naik</span>
           </button>
-          <span className="text-zinc-500 font-semibold">/{currentDir}</span>
+          <span className="text-zinc-500 font-semibold truncate">/{currentDir}</span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -470,18 +496,18 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       {/* Full Card View when File is Selected vs File List */}
       {selectedFile ? (
         <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-[#09090B] flex flex-col shadow-xl">
-          <div className="px-4 py-2.5 bg-[#141820] border-b border-zinc-800 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 text-xs font-mono text-zinc-300 truncate">
+          <div className="px-3 sm:px-4 py-2.5 bg-[#141820] border-b border-zinc-800 flex items-center justify-between gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 text-xs font-mono text-zinc-300 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setSelectedFile(null)}
-                className="text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1 cursor-pointer"
+                className="text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1 cursor-pointer shrink-0"
                 title="Kembali ke Daftar File"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Kembali</span>
               </button>
-              <span className="text-zinc-600">/</span>
+              <span className="text-zinc-600 shrink-0">/</span>
               <span className="font-semibold text-zinc-200 truncate">
                 {selectedFile}
                 {hasUnsavedChanges ? ' *' : ''}
@@ -492,7 +518,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
               type="button"
               disabled={saving || loadingFile || !hasUnsavedChanges}
               onClick={saveCurrentFile}
-              className="h-7 px-3 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+              className="h-7 px-3 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0"
             >
               <Save className="w-3 h-3" />
               <span>{saving ? 'Menyimpan...' : 'Simpan'}</span>
@@ -513,7 +539,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                 }
               }}
               spellCheck={false}
-              className="w-full flex-1 min-h-[520px] p-4 bg-[#09090B] text-zinc-100 font-mono text-xs leading-relaxed focus:outline-none resize-none"
+              className="w-full flex-1 min-h-[380px] sm:min-h-[520px] p-3 sm:p-4 bg-[#09090B] text-zinc-100 font-mono text-xs leading-relaxed focus:outline-none resize-none"
             />
           )}
         </div>
@@ -540,7 +566,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                 return (
                   <div
                     key={entry.path}
-                    className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/60 relative border-l-2 border-l-transparent hover:border-l-zinc-500"
+                    className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 sm:gap-3 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/60 relative border-l-2 border-l-transparent hover:border-l-zinc-500"
                   >
                     <button
                       type="button"
@@ -594,9 +620,10 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                         <div className="relative">
                           <button
                             type="button"
-                            onClick={() =>
-                              setActiveMenuPath(activeMenuPath === entry.path ? null : entry.path)
-                            }
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setActiveMenuPath(activeMenuPath === entry.path ? null : entry.path);
+                            }}
                             aria-label="Opsi ZIP"
                             className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer"
                           >
