@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const auth = requireAuth(req);
   if (auth.error) return auth.error;
 
-  const servers = listServersForUser(auth.session.userId, auth.session.role);
+  const servers = listServersForUser(auth.user.id, auth.user.role);
   const enriched: ServerWithMetrics[] = servers.map((srv) => ({
     ...srv,
     metrics: getServerMetrics(srv.id),

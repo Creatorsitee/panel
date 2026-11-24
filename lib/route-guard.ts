@@ -5,7 +5,9 @@ import type { ServerConfig, UserRecord } from './types';
 
 export function requireAuth(
   req: NextRequest
-): { session: SessionPayload; error?: never } | { session?: never; error: NextResponse } {
+):
+  | { session: SessionPayload; user: UserRecord; error?: never }
+  | { session?: never; user?: never; error: NextResponse } {
   const session = extractSessionFromRequest(req);
   if (!session) {
     return {
@@ -15,7 +17,18 @@ export function requireAuth(
       ),
     };
   }
-  return { session };
+
+  const user = getUserById(session.userId);
+  if (!user) {
+    return {
+      error: NextResponse.json(
+        { error: 'Akun tidak ditemukan atau telah dihapus.' },
+        { status: 401 }
+      ),
+    };
+  }
+
+  return { session, user };
 }
 
 export function requireAdmin(
@@ -28,17 +41,7 @@ export function requireAdmin(
     return { error: authResult.error };
   }
 
-  const user = getUserById(authResult.session.userId);
-  if (!user) {
-    return {
-      error: NextResponse.json(
-        { error: 'Akun tidak ditemukan atau telah dihapus.' },
-        { status: 401 }
-      ),
-    };
-  }
-
-  if (user.role !== 'admin') {
+  if (authResult.user.role !== 'admin') {
     return {
       error: NextResponse.json(
         { error: 'Akses ditolak. Fitur ini khusus administrator.' },
@@ -47,28 +50,18 @@ export function requireAdmin(
     };
   }
 
-  return { session: authResult.session, user };
+  return { session: authResult.session, user: authResult.user };
 }
 
 export function requireServerAccess(
   req: NextRequest,
   serverId: string
 ):
-  | { session: SessionPayload; server: ServerConfig; error?: never }
-  | { session?: never; server?: never; error: NextResponse } {
+  | { session: SessionPayload; user: UserRecord; server: ServerConfig; error?: never }
+  | { session?: never; user?: never; server?: never; error: NextResponse } {
   const authResult = requireAuth(req);
   if (authResult.error) {
     return { error: authResult.error };
-  }
-
-  const user = getUserById(authResult.session.userId);
-  if (!user) {
-    return {
-      error: NextResponse.json(
-        { error: 'Akun tidak ditemukan atau telah dihapus.' },
-        { status: 401 }
-      ),
-    };
   }
 
   const server = getServerById(serverId);
@@ -78,7 +71,7 @@ export function requireServerAccess(
     };
   }
 
-  if (user.role !== 'admin' && server.ownerId !== user.id) {
+  if (authResult.user.role !== 'admin' && server.ownerId !== authResult.user.id) {
     return {
       error: NextResponse.json(
         { error: 'Anda tidak memiliki izin untuk mengakses server ini.' },
@@ -87,5 +80,5 @@ export function requireServerAccess(
     };
   }
 
-  return { session: authResult.session, server };
+  return { session: authResult.session, user: authResult.user, server };
 }

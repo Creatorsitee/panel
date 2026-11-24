@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ChevronRight,
+  ChevronsRight,
   CornerDownLeft,
   Play,
   RotateCw,
@@ -102,6 +102,39 @@ function loadSavedHistory(serverId: string): string[] {
   }
 }
 
+function ChartTooltip({
+  active,
+  payload,
+  unit,
+  decimals,
+  labelTitle,
+}: {
+  active?: boolean;
+  payload?: ReadonlyArray<{ value?: number; payload?: MetricSample }>;
+  unit: string;
+  decimals: number;
+  labelTitle: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0];
+  const val = Number(point?.value ?? 0).toFixed(decimals);
+  const time = point?.payload?.time ?? '';
+
+  return (
+    <div className="rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-2.5 py-1.5 shadow-sm text-[11px]">
+      {time && (
+        <div className="text-zinc-500 dark:text-zinc-400 font-mono mb-0.5">
+          {time}
+        </div>
+      )}
+      <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+        {labelTitle}: {val}
+        {unit}
+      </div>
+    </div>
+  );
+}
+
 export default function ServerConsoleTab({
   server,
   onMetricsUpdate,
@@ -126,6 +159,7 @@ export default function ServerConsoleTab({
   const [autoScroll, setAutoScroll] = useState(true);
   const terminalRef = useRef<HTMLDivElement>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
+  const draftCommandRef = useRef('');
   const onMetricsRef = useRef(onMetricsUpdate);
   const lastStreamMetricsAtRef = useRef<number>(0);
 
@@ -266,12 +300,17 @@ export default function ServerConsoleTab({
   const canSendInput = isRunning || isBusy;
 
   useEffect(() => {
-    commandInputRef.current?.focus();
-  }, [server.id, isRunning]);
+    if (canSendInput) {
+      commandInputRef.current?.focus();
+    }
+  }, [server.id, canSendInput]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!canSendInput) return;
+      const isPasteShortcut =
+        (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'v';
+      if ((e.ctrlKey || e.metaKey || e.altKey) && !isPasteShortcut) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -289,14 +328,14 @@ export default function ServerConsoleTab({
       const selection = window.getSelection()?.toString();
       if (selection && selection.length > 0) return;
 
-      if (e.key.length === 1 || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      if (isPasteShortcut || e.key.length === 1 || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         commandInputRef.current?.focus();
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
+  }, [canSendInput]);
 
   async function runPowerAction(
     action: 'start' | 'stop' | 'restart' | 'kill'
@@ -337,18 +376,16 @@ export default function ServerConsoleTab({
 
   async function handleSendCommand(e: React.FormEvent) {
     e.preventDefault();
+    if (!canSendInput) return;
     if (!command.trim()) return;
-    if (!canSendInput) {
-      void showInfoToast('Server sedang offline', 'Tekan Start untuk menjalankan proses.');
-      commandInputRef.current?.focus();
-      return;
-    }
 
     const cmdToSend = command;
     setCommand('');
+    draftCommandRef.current = '';
     setHistoryIndex(-1);
+    setAutoScroll(true);
     setCommandHistory((prev) => {
-      const next = prev[0] === cmdToSend ? prev : [cmdToSend, ...prev.slice(0, 49)];
+      const next = [cmdToSend, ...prev.filter((item) => item !== cmdToSend)].slice(0, 50);
       try {
         window.localStorage.setItem(`cmnty_cmd_history_${server.id}`, JSON.stringify(next));
       } catch {
@@ -356,6 +393,10 @@ export default function ServerConsoleTab({
       }
       return next;
     });
+
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
 
     try {
       await apiFetch(`/api/servers/${server.id}/console`, {
@@ -372,21 +413,39 @@ export default function ServerConsoleTab({
     }
   }
 
+  function moveCaretToEnd(value: string) {
+    requestAnimationFrame(() => {
+      const input = commandInputRef.current;
+      if (input) {
+        const len = value.length;
+        input.setSelectionRange(len, len);
+      }
+    });
+  }
+
   function handleCommandKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowUp') {
       if (commandHistory.length === 0) return;
       e.preventDefault();
+      if (historyIndex === -1) {
+        draftCommandRef.current = command;
+      }
       const nextIdx = Math.min(commandHistory.length - 1, historyIndex + 1);
+      const nextVal = commandHistory[nextIdx];
       setHistoryIndex(nextIdx);
-      setCommand(commandHistory[nextIdx]);
+      setCommand(nextVal);
+      moveCaretToEnd(nextVal);
     } else if (e.key === 'ArrowDown') {
       if (historyIndex <= -1) return;
       e.preventDefault();
       const nextIdx = historyIndex - 1;
+      const nextVal = nextIdx >= 0 ? commandHistory[nextIdx] : draftCommandRef.current;
       setHistoryIndex(nextIdx);
-      setCommand(nextIdx >= 0 ? commandHistory[nextIdx] : '');
+      setCommand(nextVal);
+      moveCaretToEnd(nextVal);
     } else if (e.key === 'Escape') {
       setHistoryIndex(-1);
+      draftCommandRef.current = '';
       setCommand('');
     }
   }
@@ -444,7 +503,7 @@ export default function ServerConsoleTab({
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-10">
       {/* Top Power Actions Bar */}
-      <div className="bg-[#181b22] border border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-zinc-300">
+      <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
         <button
           type="button"
           disabled={isRunning || isBusy || powerLoading !== null}
@@ -485,8 +544,8 @@ export default function ServerConsoleTab({
       </div>
 
       {/* Console Window */}
-      <div className="bg-[#12161e] border border-zinc-800 rounded-md overflow-hidden flex flex-col">
-        <div className="px-3 sm:px-4 py-2 bg-[#171c26] border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+      <div className="bg-[#09090B] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden flex flex-col">
+        <div className="px-3 sm:px-4 py-2 bg-[#111114] border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
           <div className="flex items-center gap-2 text-xs font-mono">
             <span
               className={`inline-flex items-center font-medium uppercase px-2 py-0.5 rounded text-[11px] border ${
@@ -526,12 +585,13 @@ export default function ServerConsoleTab({
         <div
           ref={terminalRef}
           onClick={() => {
+            if (!canSendInput) return;
             const selected = window.getSelection()?.toString();
             if (!selected) {
               commandInputRef.current?.focus();
             }
           }}
-          className="h-[340px] sm:h-[420px] overflow-y-auto p-3 sm:p-4 font-mono text-[12px] leading-5 space-y-0.5 text-zinc-200 bg-[#12161e] cursor-text"
+          className="h-[340px] sm:h-[420px] overflow-y-auto p-3 sm:p-4 font-mono text-[12px] leading-5 space-y-0.5 text-zinc-200 bg-[#09090B] cursor-text"
         >
           {connectingStream && logs.length === 0 ? (
             <ConsoleLinesSkeleton />
@@ -586,33 +646,44 @@ export default function ServerConsoleTab({
         {/* Pterodactyl-style Integrated Terminal Command Input */}
         <form
           onSubmit={handleSendCommand}
-          onClick={() => commandInputRef.current?.focus()}
-          className="group border-t border-zinc-800/90 bg-[#0d1016] px-3 sm:px-3.5 h-10 flex items-center gap-2 font-mono text-xs transition-colors focus-within:bg-[#10141c] cursor-text"
+          onClick={() => {
+            if (canSendInput) commandInputRef.current?.focus();
+          }}
+          className={`group border-t border-zinc-800/90 bg-[#0C0C0E] px-3 sm:px-3.5 h-10 flex items-center gap-2 font-mono text-xs transition-colors ${
+            canSendInput ? 'focus-within:bg-[#111114] cursor-text' : 'opacity-65 cursor-not-allowed'
+          }`}
         >
-          <ChevronRight
+          <ChevronsRight
             className={`w-3.5 h-3.5 shrink-0 transition-colors ${
               canSendInput
                 ? 'text-zinc-400 group-focus-within:text-amber-400'
-                : 'text-zinc-600 group-focus-within:text-zinc-400'
+                : 'text-zinc-600'
             }`}
           />
           <input
             ref={commandInputRef}
             type="text"
+            disabled={!canSendInput}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
             aria-label="Kirim input stdin ke proses server"
             value={command}
-            onChange={(e) => setCommand(e.target.value)}
+            onChange={(e) => {
+              setCommand(e.target.value);
+              if (historyIndex !== -1) {
+                setHistoryIndex(-1);
+              }
+              draftCommandRef.current = e.target.value;
+            }}
             onKeyDown={handleCommandKeyDown}
             placeholder="Type a command..."
-            className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+            className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:cursor-not-allowed"
           />
           <button
             type="submit"
-            disabled={command.trim().length === 0}
+            disabled={!canSendInput || command.trim().length === 0}
             aria-label="Kirim perintah"
             title="Tekan Enter untuk mengirim"
             className="w-6 h-6 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/80 disabled:opacity-0 disabled:pointer-events-none transition-opacity cursor-pointer shrink-0"
@@ -622,47 +693,47 @@ export default function ServerConsoleTab({
         </form>
       </div>
 
-      {/* Pterodactyl-style Server Metrics & Real-Time Area Charts */}
+      {/* Server Metrics & Real-Time Area Charts */}
       <div className="space-y-3">
         {/* Compact 4-Tile Resource Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
-            <div className="text-xs font-medium text-slate-400 truncate">
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 min-w-0">
+            <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate">
               Address
             </div>
-            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-mono font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums mt-0.5 truncate">
               :{server.port}
             </div>
           </div>
 
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
-            <div className="text-xs font-medium text-slate-400 truncate">
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 min-w-0">
+            <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate">
               Uptime
             </div>
-            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-mono font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums mt-0.5 truncate">
               {formatDuration(metrics.uptimeSeconds)}
             </div>
           </div>
 
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
-            <div className="text-xs font-medium text-slate-400 truncate">
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 min-w-0">
+            <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate">
               CPU Load
             </div>
-            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-mono font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums mt-0.5 truncate">
               {metrics.cpuPercent.toFixed(2)}%{' '}
-              <span className="text-xs font-normal text-slate-400">
+              <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">
                 / {server.cpuLimitPercent}%
               </span>
             </div>
           </div>
 
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md px-3 sm:px-3.5 py-2.5 min-w-0">
-            <div className="text-xs font-medium text-slate-400 truncate">
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 min-w-0">
+            <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate">
               Memory
             </div>
-            <div className="text-sm sm:text-[15px] font-medium text-slate-100 tabular-nums mt-1 truncate">
+            <div className="text-sm sm:text-[15px] font-mono font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums mt-0.5 truncate">
               {formatMemoryValue(metrics.memoryMb)}{' '}
-              <span className="text-xs font-normal text-slate-400">
+              <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">
                 / {formatMemoryLimit(server.memoryLimitMb)}
               </span>
             </div>
@@ -672,8 +743,10 @@ export default function ServerConsoleTab({
         {/* CPU Load & Memory Area Charts */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {/* CPU Load Chart Card */}
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md p-3 sm:p-4 flex flex-col gap-2 min-w-0">
-            <h3 className="text-xs font-medium tracking-wide text-slate-300">CPU Load</h3>
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              CPU Load
+            </h3>
             <div className="h-[176px] w-full min-w-0">
               <ResponsiveContainer
                 width="100%"
@@ -693,11 +766,16 @@ export default function ServerConsoleTab({
                       x2="0"
                       y2="1"
                     >
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.38} />
-                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.04} />
+                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
+                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false} />
+                  <CartesianGrid
+                    stroke="currentColor"
+                    className="text-zinc-200 dark:text-zinc-800"
+                    strokeDasharray="3 3"
+                    vertical={false}
+                  />
                   <XAxis dataKey="time" hide />
                   <YAxis
                     domain={[0, cpuChartMax]}
@@ -705,22 +783,19 @@ export default function ServerConsoleTab({
                     axisLine={false}
                     tickLine={false}
                     width={56}
-                    tick={{ fill: '#64748b', fontSize: 11 }}
+                    tick={{ fill: '#71717a', fontSize: 11 }}
                     tickFormatter={(val: number) => `${val.toFixed(2)}%`}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1b222c',
-                      border: '1px solid #344050',
-                      borderRadius: '6px',
-                      fontSize: '11px',
-                      color: '#e2e8f0',
-                    }}
-                    labelStyle={{ color: '#94a3b8' }}
-                    formatter={(val) => [`${Number(val ?? 0).toFixed(2)}%`, 'CPU Load']}
-                    labelFormatter={(_, payload) =>
-                      (payload?.[0]?.payload as MetricSample | undefined)?.time ?? ''
-                    }
+                    content={(props) => (
+                      <ChartTooltip
+                        active={props.active}
+                        payload={props.payload as ReadonlyArray<{ value?: number; payload?: MetricSample }>}
+                        unit="%"
+                        decimals={2}
+                        labelTitle="CPU Load"
+                      />
+                    )}
                   />
                   <Area
                     type="monotone"
@@ -738,8 +813,10 @@ export default function ServerConsoleTab({
           </div>
 
           {/* Memory Chart Card */}
-          <div className="bg-[#262f3b] border border-[#344050] rounded-md p-3 sm:p-4 flex flex-col gap-2 min-w-0">
-            <h3 className="text-xs font-medium tracking-wide text-slate-300">Memory</h3>
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              Memory
+            </h3>
             <div className="h-[176px] w-full min-w-0">
               <ResponsiveContainer
                 width="100%"
@@ -759,11 +836,16 @@ export default function ServerConsoleTab({
                       x2="0"
                       y2="1"
                     >
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.38} />
-                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.04} />
+                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
+                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false} />
+                  <CartesianGrid
+                    stroke="currentColor"
+                    className="text-zinc-200 dark:text-zinc-800"
+                    strokeDasharray="3 3"
+                    vertical={false}
+                  />
                   <XAxis dataKey="time" hide />
                   <YAxis
                     domain={[0, ramChartMax]}
@@ -771,22 +853,19 @@ export default function ServerConsoleTab({
                     axisLine={false}
                     tickLine={false}
                     width={58}
-                    tick={{ fill: '#64748b', fontSize: 11 }}
+                    tick={{ fill: '#71717a', fontSize: 11 }}
                     tickFormatter={(val: number) => `${Math.round(val)}MiB`}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1b222c',
-                      border: '1px solid #344050',
-                      borderRadius: '6px',
-                      fontSize: '11px',
-                      color: '#e2e8f0',
-                    }}
-                    labelStyle={{ color: '#94a3b8' }}
-                    formatter={(val) => [`${Number(val ?? 0).toFixed(1)} MiB`, 'Memory']}
-                    labelFormatter={(_, payload) =>
-                      (payload?.[0]?.payload as MetricSample | undefined)?.time ?? ''
-                    }
+                    content={(props) => (
+                      <ChartTooltip
+                        active={props.active}
+                        payload={props.payload as ReadonlyArray<{ value?: number; payload?: MetricSample }>}
+                        unit=" MiB"
+                        decimals={1}
+                        labelTitle="Memory"
+                      />
+                    )}
                   />
                   <Area
                     type="monotone"

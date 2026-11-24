@@ -352,6 +352,9 @@ function runProcessCommand(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     state.installChild = child;
+    child.stdin.on('error', () => {
+      // ignore EPIPE if process exits mid-write
+    });
 
     child.stdout.on('data', (chunk: Buffer) => appendLog(serverId, 'stdout', chunk.toString('utf8')));
     child.stderr.on('data', (chunk: Buffer) => appendLog(serverId, 'stderr', chunk.toString('utf8')));
@@ -625,6 +628,10 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   state.status = 'running';
   emitStatus(serverId);
 
+  child.stdin.on('error', () => {
+    // ignore EPIPE if process exits mid-write
+  });
+
   child.stdout.on('data', (chunk: Buffer) => {
     appendLog(serverId, 'stdout', chunk.toString('utf8'));
   });
@@ -744,7 +751,7 @@ export function sendStdinToServer(serverId: string, input: string): void {
       ? state.installChild
       : null;
 
-  if (!targetChild || targetChild.stdin.destroyed) {
+  if (!targetChild || !targetChild.stdin || targetChild.stdin.destroyed || !targetChild.stdin.writable) {
     throw new Error('Server tidak sedang berjalan. Start server terlebih dahulu untuk mengirim input.');
   }
   appendLog(serverId, 'stdin', `> ${input}`);

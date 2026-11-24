@@ -1,0 +1,564 @@
+'use client';
+
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import {
+  ArrowLeft,
+  FolderOpen,
+  LogOut,
+  Menu,
+  Monitor,
+  Moon,
+  Plus,
+  Server,
+  Settings,
+  Shield,
+  Sun,
+  Terminal,
+  X,
+} from 'lucide-react';
+import { ApiError, apiFetch, setAuthToken } from './api-client';
+import CreateServerModal from './CreateServerModal';
+import { WorkspaceBootSkeleton } from './Skeletons';
+import { saveThemeMode, useThemeMode } from '@/lib/theme';
+import { showInfoToast } from '@/lib/swal';
+import type {
+  HostVpsInfo,
+  PublicUser,
+  ServerRuntimeMetrics,
+  ServerWithMetrics,
+} from '@/lib/types';
+
+export type ServerTab = 'console' | 'files' | 'settings';
+
+interface PanelContextValue {
+  user: PublicUser;
+  servers: ServerWithMetrics[];
+  hostInfo: HostVpsInfo | null;
+  loadingData: boolean;
+  loadWorkspaceData: () => Promise<void>;
+  openCreateModal: () => void;
+  handleMetricsUpdate: (serverId: string, metrics: ServerRuntimeMetrics) => void;
+  handleServerUpdated: (updated: ServerWithMetrics) => void;
+  handleServerDeleted: (serverId: string) => void;
+  upsertServer: (server: ServerWithMetrics) => void;
+}
+
+const PanelContext = createContext<PanelContextValue | null>(null);
+
+export function usePanel(): PanelContextValue {
+  const ctx = useContext(PanelContext);
+  if (!ctx) {
+    throw new Error('usePanel harus digunakan di dalam PanelShell');
+  }
+  return ctx;
+}
+
+export default function PanelShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const themeMode = useThemeMode();
+
+  const [user, setUser] = useState<PublicUser | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [servers, setServers] = useState<ServerWithMetrics[]>([]);
+  const [hostInfo, setHostInfo] = useState<HostVpsInfo | null>(null);
+  const [loadingData, setLoadingData] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const serverMatch = pathname.match(/^\/server\/([^/]+?)(?:\/(files|settings))?\/?$/);
+  const activeServerId = serverMatch ? decodeURIComponent(serverMatch[1]) : null;
+  const activeServerTab: ServerTab =
+    serverMatch?.[2] === 'files'
+      ? 'files'
+      : serverMatch?.[2] === 'settings'
+      ? 'settings'
+      : 'console';
+  const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
+
+  const loadWorkspaceData = useCallback(async () => {
+    try {
+      const [meRes, srvRes, hostRes] = await Promise.all([
+        apiFetch<{ user: PublicUser | null }>('/api/auth/me'),
+        apiFetch<{ servers: ServerWithMetrics[] }>('/api/servers'),
+        apiFetch<{ host: HostVpsInfo }>('/api/host'),
+      ]);
+      if (!meRes.user) {
+        setAuthToken(null);
+        setUser(null);
+        setServers([]);
+        const currentPath =
+          typeof window !== 'undefined' ? window.location.pathname : '/';
+        const nextQuery =
+          currentPath && currentPath !== '/'
+            ? `?next=${encodeURIComponent(currentPath)}`
+            : '';
+        router.replace(`/login${nextQuery}`);
+        return;
+      }
+      const nextUser = meRes.user;
+      setUser((prev) =>
+        prev &&
+        prev.id === nextUser.id &&
+        prev.role === nextUser.role &&
+        prev.name === nextUser.name &&
+        prev.email === nextUser.email
+          ? prev
+          : nextUser
+      );
+      setServers(srvRes.servers);
+      setHostInfo(hostRes.host);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthToken(null);
+        setUser(null);
+        setServers([]);
+        const currentPath =
+          typeof window !== 'undefined' ? window.location.pathname : '/';
+        const nextQuery =
+          currentPath && currentPath !== '/'
+            ? `?next=${encodeURIComponent(currentPath)}`
+            : '';
+        router.replace(`/login${nextQuery}`);
+      }
+    } finally {
+      setLoadingData(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function checkSession() {
+      try {
+        const res = await apiFetch<{ user: PublicUser | null }>('/api/auth/me');
+        if (!mounted) return;
+        if (res.user) {
+          setUser(res.user);
+          setLoadingData(true);
+        } else {
+          const currentPath =
+            typeof window !== 'undefined' ? window.location.pathname : '/';
+          const nextQuery =
+            currentPath && currentPath !== '/'
+              ? `?next=${encodeURIComponent(currentPath)}`
+              : '';
+          router.replace(`/login${nextQuery}`);
+        }
+      } catch {
+        if (mounted) {
+          const currentPath =
+            typeof window !== 'undefined' ? window.location.pathname : '/';
+          const nextQuery =
+            currentPath && currentPath !== '/'
+              ? `?next=${encodeURIComponent(currentPath)}`
+              : '';
+          router.replace(`/login${nextQuery}`);
+        }
+      } finally {
+        if (mounted) setCheckingAuth(false);
+      }
+    }
+    void checkSession();
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  const userId = user?.id ?? null;
+
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    const runFetch = async () => {
+      if (!active) return;
+      await loadWorkspaceData();
+    };
+    void runFetch();
+    const timer = setInterval(() => {
+      void runFetch();
+    }, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [userId, loadWorkspaceData]);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    setAuthToken(null);
+    setUser(null);
+    setServers([]);
+    void showInfoToast('Berhasil keluar');
+    router.replace('/login');
+  }, [router]);
+
+  const handleMetricsUpdate = useCallback(
+    (serverId: string, metrics: ServerRuntimeMetrics) => {
+      setServers((prev) =>
+        prev.map((s) => (s.id === serverId ? { ...s, metrics } : s))
+      );
+    },
+    []
+  );
+
+  const handleServerUpdated = useCallback(
+    (updated: ServerWithMetrics) => {
+      setServers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      void loadWorkspaceData();
+    },
+    [loadWorkspaceData]
+  );
+
+  const handleServerDeleted = useCallback(
+    (serverId: string) => {
+      setServers((prev) => prev.filter((s) => s.id !== serverId));
+      void loadWorkspaceData();
+      if (activeServerId === serverId) {
+        router.push('/');
+      }
+    },
+    [activeServerId, loadWorkspaceData, router]
+  );
+
+  const upsertServer = useCallback((server: ServerWithMetrics) => {
+    setServers((prev) => {
+      const idx = prev.findIndex((s) => s.id === server.id);
+      if (idx === -1) return [server, ...prev];
+      const next = [...prev];
+      next[idx] = server;
+      return next;
+    });
+  }, []);
+
+  const openCreateModal = useCallback(() => {
+    setCreateOpen(true);
+    void loadWorkspaceData();
+  }, [loadWorkspaceData]);
+
+  const activeServer = useMemo(
+    () => (activeServerId ? servers.find((s) => s.id === activeServerId) || null : null),
+    [servers, activeServerId]
+  );
+
+  const contextValue = useMemo<PanelContextValue | null>(
+    () =>
+      user
+        ? {
+            user,
+            servers,
+            hostInfo,
+            loadingData,
+            loadWorkspaceData,
+            openCreateModal,
+            handleMetricsUpdate,
+            handleServerUpdated,
+            handleServerDeleted,
+            upsertServer,
+          }
+        : null,
+    [
+      user,
+      servers,
+      hostInfo,
+      loadingData,
+      loadWorkspaceData,
+      openCreateModal,
+      handleMetricsUpdate,
+      handleServerUpdated,
+      handleServerDeleted,
+      upsertServer,
+    ]
+  );
+
+  if (checkingAuth || !user || !contextValue) {
+    return <WorkspaceBootSkeleton />;
+  }
+
+  const encodedServerId = activeServerId ? encodeURIComponent(activeServerId) : '';
+  const serverTabs: {
+    id: ServerTab;
+    href: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = activeServerId
+    ? [
+        { id: 'console', href: `/server/${encodedServerId}`, label: 'Console', icon: Terminal },
+        {
+          id: 'files',
+          href: `/server/${encodedServerId}/files`,
+          label: 'File Manager',
+          icon: FolderOpen,
+        },
+        {
+          id: 'settings',
+          href: `/server/${encodedServerId}/settings`,
+          label: 'Pengaturan',
+          icon: Settings,
+        },
+      ]
+    : [];
+
+  const activeTabLabel =
+    serverTabs.find((t) => t.id === activeServerTab)?.label || 'Console';
+
+  return (
+    <PanelContext.Provider value={contextValue}>
+      <div className="min-h-screen bg-white dark:bg-[#09090B] text-zinc-900 dark:text-zinc-100 flex">
+        {mobileNavOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* Sidebar */}
+        <aside
+          className={`fixed lg:static inset-y-0 left-0 z-50 w-60 shrink-0 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-transform duration-150 ${
+            mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+          }`}
+        >
+          <div className="h-14 px-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <Link
+              href="/"
+              onClick={() => setMobileNavOpen(false)}
+              className="text-sm font-bold tracking-tight uppercase cursor-pointer"
+            >
+              cmnty
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(false)}
+              aria-label="Tutup menu"
+              className="lg:hidden w-8 h-8 rounded flex items-center justify-center text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <nav className="flex-1 p-3 space-y-6 overflow-y-auto" aria-label="Navigasi utama">
+            <div className="space-y-1">
+              <div className="px-3 pb-2 text-[10px] font-semibold tracking-wider text-zinc-400 uppercase">
+                Navigasi Utama
+              </div>
+              <Link
+                href="/"
+                onClick={() => setMobileNavOpen(false)}
+                className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
+                  !activeServerId && !isAdminRoute
+                    ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                <Server className="w-4 h-4 shrink-0" />
+                <span>Daftar Server</span>
+              </Link>
+
+              {user.role === 'admin' && (
+                <Link
+                  href="/admin"
+                  onClick={() => setMobileNavOpen(false)}
+                  className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
+                    !activeServerId && isAdminRoute
+                      ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                      : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <Shield className="w-4 h-4 shrink-0" />
+                  <span>Panel Admin</span>
+                </Link>
+              )}
+            </div>
+
+            {activeServerId && (
+              <div className="space-y-1 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                <div className="px-3 pb-2 text-[10px] font-semibold tracking-wider text-zinc-400 uppercase truncate">
+                  Server: {activeServer ? activeServer.name : activeServerId}
+                </div>
+                {serverTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeServerTab === tab.id;
+                  return (
+                    <Link
+                      key={tab.id}
+                      href={tab.href}
+                      onClick={() => setMobileNavOpen(false)}
+                      className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
+                        isActive
+                          ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                          : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span>{tab.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </nav>
+
+          <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-3">
+            <div
+              role="radiogroup"
+              aria-label="Pilih tema tampilan"
+              className="grid grid-cols-3 gap-1 p-1 rounded bg-zinc-200/60 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800"
+            >
+              {(
+                [
+                  { id: 'light', label: 'Light', icon: Sun },
+                  { id: 'dark', label: 'Dark', icon: Moon },
+                  { id: 'system', label: 'System', icon: Monitor },
+                ] as const
+              ).map((opt) => {
+                const Icon = opt.icon;
+                const active = themeMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={`Tema ${opt.label}`}
+                    title={opt.label}
+                    onClick={() => saveThemeMode(opt.id)}
+                    className={`h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 px-1">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold truncate flex items-center gap-1.5">
+                  <span className="truncate">{user.name}</span>
+                  {user.role === 'admin' && (
+                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
+                      admin
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-zinc-500 truncate font-mono">
+                  {user.email}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                aria-label="Keluar dari akun"
+                title="Keluar"
+                className="w-8 h-8 rounded flex items-center justify-center text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Content */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 flex items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Buka menu"
+                className="lg:hidden w-8 h-8 rounded flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
+              >
+                <Menu className="w-4 h-4" />
+              </button>
+
+              <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 sm:gap-2 text-xs min-w-0">
+                <Link
+                  href="/"
+                  className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors whitespace-nowrap shrink-0"
+                >
+                  Panel
+                </Link>
+                <span className="text-zinc-400 shrink-0">/</span>
+                {activeServerId ? (
+                  <>
+                    <Link
+                      href={`/server/${encodedServerId}`}
+                      className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline truncate max-w-[110px] sm:max-w-xs"
+                    >
+                      {activeServer ? activeServer.name : activeServerId}
+                    </Link>
+                    <span className="text-zinc-400 shrink-0">/</span>
+                    <span className="text-zinc-600 dark:text-zinc-400 whitespace-nowrap truncate">
+                      {activeTabLabel}
+                    </span>
+                  </>
+                ) : isAdminRoute && user.role === 'admin' ? (
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
+                    Panel Admin
+                  </span>
+                ) : (
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
+                    Daftar Server
+                  </span>
+                )}
+              </nav>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {activeServerId ? (
+                <Link
+                  href="/"
+                  className="h-8 px-3 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Semua Server</span>
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="h-8 px-3.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 text-xs font-medium inline-flex items-center gap-1.5 transition-opacity cursor-pointer whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Buat Server</span>
+                </button>
+              )}
+            </div>
+          </header>
+
+          <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
+            {children}
+          </main>
+        </div>
+
+        <CreateServerModal
+          open={createOpen}
+          hostInfo={hostInfo}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(created) => {
+            setServers((prev) => [created, ...prev]);
+            void loadWorkspaceData();
+            router.push(`/server/${encodeURIComponent(created.id)}`);
+          }}
+        />
+      </div>
+    </PanelContext.Provider>
+  );
+}

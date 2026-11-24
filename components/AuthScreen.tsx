@@ -1,20 +1,74 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { apiFetch, setAuthToken } from './api-client';
+import { useThemeMode } from '@/lib/theme';
 import { showErrorAlert, showSuccessToast } from '@/lib/swal';
 import type { PublicUser } from '@/lib/types';
 
 interface AuthScreenProps {
-  onAuthenticated: (user: PublicUser) => void;
+  initialMode?: 'login' | 'register';
+  onAuthenticated?: (user: PublicUser) => void;
 }
 
-export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+function getSafeNextPath(): string {
+  if (typeof window === 'undefined') return '/';
+  try {
+    const nextParam = new URLSearchParams(window.location.search).get('next');
+    if (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//')) {
+      return nextParam;
+    }
+  } catch {
+    // ignore URL parse error
+  }
+  return '/';
+}
+
+export default function AuthScreen({
+  initialMode = 'login',
+  onAuthenticated,
+}: AuthScreenProps) {
+  const router = useRouter();
+  useThemeMode();
+
+  const mode = initialMode;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const safeNext = getSafeNextPath();
+    let active = true;
+    async function checkExistingSession() {
+      try {
+        const res = await apiFetch<{ user: PublicUser | null }>('/api/auth/me');
+        if (active && res.user) {
+          if (onAuthenticated) {
+            onAuthenticated(res.user);
+          } else {
+            router.replace(safeNext);
+          }
+        }
+      } catch {
+        // not authenticated
+      }
+    }
+    void checkExistingSession();
+    return () => {
+      active = false;
+    };
+  }, [onAuthenticated, router]);
+
+  function navigateAuthMode(targetPath: '/login' | '/register', e: React.MouseEvent<HTMLAnchorElement>) {
+    const safeNext = getSafeNextPath();
+    if (safeNext !== '/') {
+      e.preventDefault();
+      router.replace(`${targetPath}?next=${encodeURIComponent(safeNext)}`);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,7 +87,11 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         mode === 'login' ? 'Berhasil masuk' : 'Akun berhasil dibuat',
         `Selamat datang, ${data.user.name}`
       );
-      onAuthenticated(data.user);
+      if (onAuthenticated) {
+        onAuthenticated(data.user);
+      } else {
+        router.replace(getSafeNextPath());
+      }
     } catch (err) {
       await showErrorAlert(
         mode === 'login' ? 'Gagal Masuk' : 'Gagal Mendaftar',
@@ -68,32 +126,32 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           role="tablist"
           aria-label="Mode autentikasi"
         >
-          <button
-            type="button"
+          <Link
+            href="/login"
+            onClick={(e) => navigateAuthMode('/login', e)}
             role="tab"
             aria-selected={mode === 'login'}
-            onClick={() => setMode('login')}
-            className={`pb-2.5 text-xs font-medium border-b-2 -mb-px transition-colors cursor-pointer whitespace-nowrap ${
+            className={`pb-2.5 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               mode === 'login'
                 ? 'border-zinc-950 dark:border-zinc-100 text-zinc-950 dark:text-zinc-100'
                 : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'
             }`}
           >
             Masuk
-          </button>
-          <button
-            type="button"
+          </Link>
+          <Link
+            href="/register"
+            onClick={(e) => navigateAuthMode('/register', e)}
             role="tab"
             aria-selected={mode === 'register'}
-            onClick={() => setMode('register')}
-            className={`pb-2.5 text-xs font-medium border-b-2 -mb-px transition-colors cursor-pointer whitespace-nowrap ${
+            className={`pb-2.5 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               mode === 'register'
                 ? 'border-zinc-950 dark:border-zinc-100 text-zinc-950 dark:text-zinc-100'
                 : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'
             }`}
           >
             Daftar Akun
-          </button>
+          </Link>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
