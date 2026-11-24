@@ -42,7 +42,7 @@ EOF
 fi
 
 echo "==> [4/6] Memasang dependensi npm dan membangun aplikasi..."
-npm ci --omit=dev=false
+npm install
 npm run build
 
 mkdir -p "${APP_DIR}/data/servers"
