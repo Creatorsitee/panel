@@ -1,11 +1,35 @@
-<div align="center">
+# Nodal Panel
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Panel manajemen server Node.js dan Python real-time bergaya Pterodactyl yang berjalan langsung di VPS Anda.
 
-  <h1>Built with AI Studio</h2>
+## Deploy Otomatis ke VPS (Ubuntu / Debian)
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+Cukup `git clone` repositori ini ke VPS Anda dan jalankan installer otomatis:
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+```bash
+git clone <url-repositori-anda> nodal-panel
+cd nodal-panel
+sudo bash install.sh
+```
 
-</div>
+Installer akan otomatis:
+1. Memastikan Node.js 22+, Python 3, `pip3`, dan `git` terpasang.
+2. Membuat `PANEL_SESSION_SECRET` acak di `.env`.
+3. Membangun aplikasi produksi (`npm run build`).
+4. Mendaftarkan dan menjalankan service `systemd` (`nodal-panel.service`) di port `3000`.
+
+## Menjalankan dengan PM2
+
+```bash
+npm install
+npm run build
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+## Menjalankan dengan Docker
+
+```bash
+docker build -t nodal-panel .
+docker run -d -p 3000:3000 -v nodal_data:/app/data --name nodal-panel nodal-panel
+```

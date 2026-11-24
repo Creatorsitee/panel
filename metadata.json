@@ -1,0 +1,6 @@
+{
+  "name": "Nodal Panel",
+  "description": "Panel manajemen server Node.js dan Python real-time untuk deployment VPS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
