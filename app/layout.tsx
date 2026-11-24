@@ -17,9 +17,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 const appUrl = process.env.APP_URL || 'http://localhost:3000';
-const siteTitle = 'cmnty — Panel Server Node.js & Python Self-Host';
+const siteTitle = 'cmnty — Node.js & Python Server Management Panel';
 const siteDescription =
-  'Kelola, pantau, dan jalankan server Node.js serta Python secara real-time di VPS self-host dengan konsol dan file manager cmnty.';
+  'Panel manajemen server mandiri untuk mengelola aplikasi Node.js dan Python secara real-time di VPS.';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -40,11 +40,10 @@ export const metadata: Metadata = {
   description: siteDescription,
   keywords: [
     'cmnty',
-    'panel server',
-    'Node.js server panel',
-    'Python server manager',
-    'VPS self-host',
-    'real-time console',
+    'server panel',
+    'Node.js manager',
+    'Python server',
+    'VPS dashboard',
     'process monitor',
     'file manager',
   ],
@@ -83,19 +82,13 @@ export const metadata: Metadata = {
 
 const structuredData = {
   '@context': 'https://schema.org',
-  '@type': 'WebApplication',
+  '@type': 'SoftwareApplication',
   name: 'cmnty',
   url: appUrl,
   applicationCategory: 'DeveloperApplication',
   operatingSystem: 'Linux',
   inLanguage: 'id',
   description: siteDescription,
-  featureList: [
-    'Manajemen proses Node.js & Python real-time',
-    'Terminal console streaming interaktif',
-    'Pemantauan CPU Load dan Memory real-time',
-    'File Manager & editor kode terintegrasi',
-  ],
   offers: {
     '@type': 'Offer',
     price: '0',

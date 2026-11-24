@@ -66,6 +66,75 @@ function formatTimeLabel(date = new Date()): string {
   });
 }
 
+function renderHighlightedLogText(text: string): React.ReactNode {
+  if (!text) return null;
+  const parts: React.ReactNode[] = [];
+  const regex = /(\[?(?:INFO|WARN|ERROR|FATAL|DEBUG|SUCCESS|OK|daemon)\]?|\b(?:GET|POST|PUT|DELETE|PATCH)\b|\b[1-5]\d{2}\b|\b[a-zA-Z0-9_/.-]+\.(?:js|ts|py|json|html|css|txt|log)\b)/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const matchStr = match[0];
+    const startIndex = match.index;
+
+    if (startIndex > lastIndex) {
+      parts.push(text.slice(lastIndex, startIndex));
+    }
+
+    const upper = matchStr.toUpperCase();
+    if (upper.includes('ERROR') || upper.includes('FATAL')) {
+      parts.push(
+        <span key={`${startIndex}-err`} className="text-red-400 font-semibold bg-red-500/10 px-1 rounded">
+          {matchStr}
+        </span>
+      );
+    } else if (upper.includes('WARN')) {
+      parts.push(
+        <span key={`${startIndex}-warn`} className="text-amber-400 font-semibold">
+          {matchStr}
+        </span>
+      );
+    } else if (upper.includes('INFO') || upper.includes('SUCCESS') || upper.includes('OK') || upper.includes('DAEMON')) {
+      parts.push(
+        <span key={`${startIndex}-info`} className="text-cyan-400 font-semibold">
+          {matchStr}
+        </span>
+      );
+    } else if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(upper)) {
+      parts.push(
+        <span key={`${startIndex}-http`} className="text-emerald-400 font-bold px-1 bg-emerald-500/10 rounded">
+          {matchStr}
+        </span>
+      );
+    } else if (/^[1-5]\d{2}$/.test(matchStr)) {
+      const code = Number(matchStr);
+      const colorClass = code < 300 ? 'text-emerald-400 font-bold' : code < 400 ? 'text-amber-400 font-bold' : 'text-red-400 font-bold';
+      parts.push(
+        <span key={`${startIndex}-status`} className={colorClass}>
+          {matchStr}
+        </span>
+      );
+    } else if (/\.(?:js|ts|py|json|html|css|txt|log)$/.test(matchStr)) {
+      parts.push(
+        <span key={`${startIndex}-file`} className="text-purple-300 underline underline-offset-2">
+          {matchStr}
+        </span>
+      );
+    } else {
+      parts.push(matchStr);
+    }
+
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return <>{parts}</>;
+}
+
 export default function ServerConsoleTab({
   server,
   onMetricsUpdate,
@@ -396,52 +465,53 @@ export default function ServerConsoleTab({
                 return (
                   <div key={line.id} className="break-words">
                     <span className="text-amber-400/90 select-none">[cmnty Daemon]: </span>
-                    <span className="text-slate-300">{line.text}</span>
+                    <span className="text-slate-300">{renderHighlightedLogText(line.text)}</span>
                   </div>
                 );
               }
               if (line.stream === 'stdin') {
                 return (
-                  <div key={line.id} className="break-words text-cyan-400">
-                    {line.text}
+                  <div key={line.id} className="break-words text-cyan-300">
+                    <span className="select-none text-cyan-500 mr-1.5 font-semibold">$</span>
+                    {renderHighlightedLogText(line.text)}
                   </div>
                 );
               }
               if (line.stream === 'stderr') {
                 return (
-                  <div key={line.id} className="break-words text-red-400">
-                    {line.text}
+                  <div key={line.id} className="break-words text-red-400 bg-red-500/5 px-1.5 py-0.5 rounded border-l-2 border-red-500">
+                    {renderHighlightedLogText(line.text)}
                   </div>
                 );
               }
               return (
                 <div key={line.id} className="break-words text-slate-200">
-                  {line.text}
+                  {renderHighlightedLogText(line.text)}
                 </div>
               );
             })
           )}
         </div>
 
-        {/* Pterodactyl-style Terminal Command Input Footer */}
+        {/* Pterodactyl-style Professional Terminal Command Input Footer */}
         <form
           onSubmit={handleSendCommand}
-          className="border-t border-[#2c3746] bg-[#18202a] px-3.5 py-2 flex items-center gap-2.5"
+          className="border-t border-[#1f2937] bg-[#0c1017] px-4 py-2.5 flex items-center gap-3 font-mono text-xs shadow-inner"
         >
-          <span className="text-slate-400 font-mono text-xs select-none">&gt;&gt;</span>
+          <span className="text-cyan-400 select-none font-semibold tracking-tight">container@cmnty~ $</span>
           <input
             type="text"
             aria-label="Kirim input stdin ke proses server"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            placeholder={isRunning ? 'Type a command...' : 'Server sedang offline...'}
+            placeholder={isRunning ? 'Type a command and press Enter...' : 'Server offline (tekan Start)...'}
             disabled={!isRunning}
-            className="flex-1 h-8 bg-transparent text-xs font-mono text-slate-100 placeholder:text-slate-500 focus:outline-none disabled:opacity-50"
+            className="flex-1 bg-transparent text-slate-100 placeholder:text-slate-600 focus:outline-none disabled:opacity-40"
           />
           {isRunning && command.trim().length > 0 && (
             <button
               type="submit"
-              className="h-7 px-3 rounded bg-[#2c3746] hover:bg-[#374558] border border-[#3d4c60] text-slate-100 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+              className="h-7 px-3.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap shadow-sm"
             >
               Kirim
             </button>
