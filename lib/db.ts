@@ -163,6 +163,7 @@ export async function updateServerRecord(
       | 'name'
       | 'description'
       | 'startupCommand'
+      | 'port'
       | 'memoryLimitMb'
       | 'cpuLimitPercent'
       | 'autoRestart'

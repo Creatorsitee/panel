@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteServerRecord, updateServerRecord } from '@/lib/db';
-import { getServerMetrics, stopServerProcess } from '@/lib/process-manager';
+import { deleteServerRecord, listAllServers, updateServerRecord } from '@/lib/db';
+import { updateServerDotEnvPort } from '@/lib/file-manager';
+import { getHostVpsInfo, getServerMetrics, stopServerProcess } from '@/lib/process-manager';
 import { requireServerAccess } from '@/lib/route-guard';
 import {
   parseSafeStartupCommand,
   validateServerName,
+  validateServerPort,
 } from '@/lib/security';
+import {
+  getAvailableCpuPercent,
+  getAvailableMemoryMb,
+  getPerServerMaxCpuPercent,
+  getPerServerMaxMemoryMb,
+} from '@/lib/vps-specs';
 
 export async function GET(
   req: NextRequest,
@@ -36,10 +44,34 @@ export async function PATCH(
       name?: string;
       description?: string;
       startupCommand?: string;
+      port?: number | string;
       memoryLimitMb?: number;
       cpuLimitPercent?: number;
       autoRestart?: boolean;
     };
+
+    const host = getHostVpsInfo();
+    const currentMetrics = getServerMetrics(id);
+    const isServerActive =
+      currentMetrics.status === 'running' ||
+      currentMetrics.status === 'starting' ||
+      currentMetrics.status === 'installing';
+    const perServerMaxMem = getPerServerMaxMemoryMb(host);
+    const perServerMaxCpu = getPerServerMaxCpuPercent(host);
+    const maxMemoryForServer = Math.max(
+      access.server.memoryLimitMb,
+      Math.min(
+        perServerMaxMem,
+        getAvailableMemoryMb(host, isServerActive ? access.server.memoryLimitMb : 0)
+      )
+    );
+    const maxCpuForServer = Math.max(
+      access.server.cpuLimitPercent,
+      Math.min(
+        perServerMaxCpu,
+        getAvailableCpuPercent(host, isServerActive ? access.server.cpuLimitPercent : 0)
+      )
+    );
 
     const patch: Parameters<typeof updateServerRecord>[1] = {};
 
@@ -53,17 +85,49 @@ export async function PATCH(
       parseSafeStartupCommand(body.startupCommand, access.server.runtime);
       patch.startupCommand = body.startupCommand.trim();
     }
+    if (body.port !== undefined && body.port !== null && String(body.port).trim() !== '') {
+      const usedPorts = listAllServers()
+        .filter((s) => s.id !== id)
+        .map((s) => s.port);
+      const nextPort = validateServerPort(body.port, usedPorts);
+      if (nextPort !== access.server.port) {
+        patch.port = nextPort;
+      }
+    }
     if (body.memoryLimitMb !== undefined) {
-      patch.memoryLimitMb = Math.min(8192, Math.max(128, Number(body.memoryLimitMb) || 512));
+      const requestedMem = Number(body.memoryLimitMb);
+      if (Number.isFinite(requestedMem) && requestedMem > maxMemoryForServer) {
+        return NextResponse.json(
+          { error: `Alokasi memori melebihi batas per server atau sisa kapasitas VPS (${maxMemoryForServer} MB).` },
+          { status: 400 }
+        );
+      }
+      patch.memoryLimitMb = Math.min(
+        maxMemoryForServer,
+        Math.max(512, requestedMem || access.server.memoryLimitMb)
+      );
     }
     if (body.cpuLimitPercent !== undefined) {
-      patch.cpuLimitPercent = Math.min(400, Math.max(25, Number(body.cpuLimitPercent) || 100));
+      const requestedCpu = Number(body.cpuLimitPercent);
+      if (Number.isFinite(requestedCpu) && requestedCpu > maxCpuForServer) {
+        return NextResponse.json(
+          { error: `Batas CPU melebihi batas per server atau sisa kapasitas VPS (${maxCpuForServer}%).` },
+          { status: 400 }
+        );
+      }
+      patch.cpuLimitPercent = Math.min(
+        maxCpuForServer,
+        Math.max(10, requestedCpu || access.server.cpuLimitPercent)
+      );
     }
     if (body.autoRestart !== undefined) {
       patch.autoRestart = Boolean(body.autoRestart);
     }
 
     const updated = await updateServerRecord(id, patch);
+    if (patch.port !== undefined) {
+      updateServerDotEnvPort(id, patch.port);
+    }
 
     return NextResponse.json({
       server: {

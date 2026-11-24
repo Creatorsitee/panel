@@ -153,16 +153,32 @@ export function extractSessionFromRequest(req: NextRequest): SessionPayload | nu
   return null;
 }
 
-export function attachSessionCookie(res: NextResponse, token: string): void {
+function isSecureRequest(req?: NextRequest): boolean {
+  if (!req) return false;
+  const forwardedProto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+  if (forwardedProto === 'https') return true;
+  if (forwardedProto === 'http') return false;
+  return req.nextUrl.protocol === 'https:';
+}
+
+export function attachSessionCookie(res: NextResponse, token: string, req?: NextRequest): void {
+  const secure = isSecureRequest(req);
+  const cookieAttrs = secure
+    ? 'HttpOnly; Secure; SameSite=None; Partitioned'
+    : 'HttpOnly; SameSite=Lax';
   res.headers.append(
     'Set-Cookie',
-    `${SESSION_COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=None; Partitioned`
+    `${SESSION_COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_TTL_SECONDS}; ${cookieAttrs}`
   );
 }
 
-export function clearSessionCookie(res: NextResponse): void {
+export function clearSessionCookie(res: NextResponse, req?: NextRequest): void {
+  const secure = isSecureRequest(req);
+  const cookieAttrs = secure
+    ? 'HttpOnly; Secure; SameSite=None; Partitioned'
+    : 'HttpOnly; SameSite=Lax';
   res.headers.append(
     'Set-Cookie',
-    `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None; Partitioned`
+    `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; ${cookieAttrs}`
   );
 }

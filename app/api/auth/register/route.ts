@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       user: toPublicUser(user),
       token,
     }, { status: 201 });
-    attachSessionCookie(res, token);
+    attachSessionCookie(res, token, req);
     return res;
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Gagal mendaftarkan akun.';

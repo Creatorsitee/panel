@@ -1,18 +1,25 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2, Terminal, ShieldAlert } from 'lucide-react';
 import { apiFetch } from './api-client';
-import type { ServerWithMetrics } from '@/lib/types';
+import { showConfirmDialog, showErrorAlert, showSuccessToast } from '@/lib/swal';
+import {
+  getVpsCpuOptions,
+  getVpsMemoryOptions,
+} from '@/lib/vps-specs';
+import type { HostVpsInfo, ServerWithMetrics } from '@/lib/types';
 
 interface ServerSettingsTabProps {
   server: ServerWithMetrics;
+  hostInfo: HostVpsInfo | null;
   onUpdated: (server: ServerWithMetrics) => void;
   onDeleted: (serverId: string) => void;
 }
 
 export default function ServerSettingsTab({
   server,
+  hostInfo,
   onUpdated,
   onDeleted,
 }: ServerSettingsTabProps) {
@@ -20,26 +27,80 @@ export default function ServerSettingsTab({
   const [description, setDescription] = useState(server.description);
   const [startupCommand, setStartupCommand] = useState(server.startupCommand);
   const [autoRestart, setAutoRestart] = useState(server.autoRestart);
+  const [portInput, setPortInput] = useState(String(server.port));
   const [memoryLimitMb, setMemoryLimitMb] = useState(server.memoryLimitMb);
   const [cpuLimitPercent, setCpuLimitPercent] = useState(server.cpuLimitPercent);
 
-  const [savingStatus, setSavingStatus] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const isInitialMount = useRef(true);
+  const lastSavedRef = useRef({
+    name: server.name,
+    description: server.description,
+    startupCommand: server.startupCommand,
+    autoRestart: server.autoRestart,
+    port: server.port,
+    memoryLimitMb: server.memoryLimitMb,
+    cpuLimitPercent: server.cpuLimitPercent,
+  });
 
-  // Auto-save on changes with debounce
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
+  const isServerActive =
+    server.metrics.status === 'running' ||
+    server.metrics.status === 'starting' ||
+    server.metrics.status === 'installing';
+
+  const memoryOptions = useMemo(() => {
+    const opts = getVpsMemoryOptions(hostInfo, isServerActive ? server.memoryLimitMb : 0);
+    if (!opts.some((o) => o.value === server.memoryLimitMb)) {
+      return [
+        ...opts,
+        {
+          value: server.memoryLimitMb,
+          label:
+            server.memoryLimitMb >= 1024
+              ? `${server.memoryLimitMb} MB (${Number((server.memoryLimitMb / 1024).toFixed(1))} GB)`
+              : `${server.memoryLimitMb} MB`,
+        },
+      ].sort((a, b) => a.value - b.value);
     }
+    return opts;
+  }, [hostInfo, isServerActive, server.memoryLimitMb]);
+
+  const cpuOptions = useMemo(() => {
+    const opts = getVpsCpuOptions(hostInfo, isServerActive ? server.cpuLimitPercent : 0);
+    if (!opts.some((o) => o.value === server.cpuLimitPercent)) {
+      const cores = Number((server.cpuLimitPercent / 100).toFixed(2));
+      return [
+        ...opts,
+        {
+          value: server.cpuLimitPercent,
+          label: `${server.cpuLimitPercent}% (${cores} ${cores === 1 ? 'Core' : 'Cores'})`,
+        },
+      ].sort((a, b) => a.value - b.value);
+    }
+    return opts;
+  }, [hostInfo, isServerActive, server.cpuLimitPercent]);
+
+  // Silent auto-save only when values actually differ from last saved state
+  useEffect(() => {
+    const saved = lastSavedRef.current;
+    const trimmedPort = portInput.trim();
+    const parsedPort = trimmedPort ? Number(trimmedPort) : saved.port;
+    const portValid =
+      Number.isInteger(parsedPort) && parsedPort >= 1024 && parsedPort <= 65535;
+    const portChanged = portValid && parsedPort !== saved.port;
+
+    const isDirty =
+      name !== saved.name ||
+      description !== saved.description ||
+      startupCommand !== saved.startupCommand ||
+      autoRestart !== saved.autoRestart ||
+      portChanged ||
+      memoryLimitMb !== saved.memoryLimitMb ||
+      cpuLimitPercent !== saved.cpuLimitPercent;
+
+    if (!isDirty) return;
 
     const timer = setTimeout(async () => {
-      setSavingStatus('Menyimpan otomatis...');
-      setError(null);
       try {
         const res = await apiFetch<{ server: ServerWithMetrics }>(
           `/api/servers/${server.id}`,
@@ -50,57 +111,65 @@ export default function ServerSettingsTab({
               description,
               startupCommand,
               autoRestart,
+              ...(portChanged ? { port: parsedPort } : {}),
               memoryLimitMb,
               cpuLimitPercent,
             }),
           }
         );
+        lastSavedRef.current = {
+          name: res.server.name,
+          description: res.server.description,
+          startupCommand: res.server.startupCommand,
+          autoRestart: res.server.autoRestart,
+          port: res.server.port,
+          memoryLimitMb: res.server.memoryLimitMb,
+          cpuLimitPercent: res.server.cpuLimitPercent,
+        };
         onUpdated(res.server);
-        setSavingStatus('Tersimpan otomatis');
-        const clearTimer = setTimeout(() => setSavingStatus(null), 2000);
-        return () => clearTimeout(clearTimer);
+        void showSuccessToast('Pengaturan tersimpan');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Gagal menyimpan perubahan.');
-        setSavingStatus(null);
+        await showErrorAlert(
+          'Gagal Menyimpan Perubahan',
+          err instanceof Error ? err.message : 'Gagal menyimpan perubahan.'
+        );
       }
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [name, description, startupCommand, autoRestart, memoryLimitMb, cpuLimitPercent, server.id, onUpdated]);
+  }, [name, description, startupCommand, autoRestart, portInput, memoryLimitMb, cpuLimitPercent, server.id, onUpdated]);
 
   async function handleDelete() {
+    const confirmed = await showConfirmDialog({
+      title: `Hapus server "${server.name}"?`,
+      text: 'Tindakan ini permanen dan akan menghapus seluruh file server serta menghentikan proses yang berjalan.',
+      confirmText: 'Ya, Hapus Server',
+      cancelText: 'Batal',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
     setDeleting(true);
-    setError(null);
     try {
       await apiFetch(`/api/servers/${server.id}`, { method: 'DELETE' });
+      void showSuccessToast('Server dihapus', server.name);
       onDeleted(server.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal menghapus server.');
+      await showErrorAlert(
+        'Gagal Menghapus Server',
+        err instanceof Error ? err.message : 'Gagal menghapus server.'
+      );
       setDeleting(false);
     }
   }
 
   return (
     <div className="space-y-6 max-w-3xl pb-12">
-      <div className="flex items-center justify-between">
+      <div>
         <h2 className="text-sm font-semibold tracking-tight text-zinc-800 dark:text-zinc-200">
           Pengaturan Server
         </h2>
-        {savingStatus && (
-          <span className="text-xs font-mono text-emerald-500 animate-pulse">
-            {savingStatus}
-          </span>
-        )}
       </div>
-
-      {error && (
-        <div
-          role="alert"
-          className="p-3 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-500 font-medium"
-        >
-          {error}
-        </div>
-      )}
 
       <div className="space-y-6">
         <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 space-y-4">
@@ -133,12 +202,12 @@ export default function ServerSettingsTab({
               onChange={(e) => setAutoRestart(e.target.checked)}
               className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-900 dark:accent-zinc-100"
             />
-            <span>Auto-restart otomatis saat proses berhenti karena error</span>
+            <span>Auto-restart otomatis saat proses berhenti</span>
           </label>
         </div>
 
         <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-5 space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
               Detail &amp; Alokasi Resource
             </h3>
@@ -183,11 +252,11 @@ export default function ServerSettingsTab({
                 onChange={(e) => setMemoryLimitMb(Number(e.target.value))}
                 className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
               >
-                <option value={256}>256 MB</option>
-                <option value={512}>512 MB</option>
-                <option value={1024}>1024 MB (1 GB)</option>
-                <option value={2048}>2048 MB (2 GB)</option>
-                <option value={4096}>4096 MB (4 GB)</option>
+                {memoryOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -201,11 +270,27 @@ export default function ServerSettingsTab({
                 onChange={(e) => setCpuLimitPercent(Number(e.target.value))}
                 className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
               >
-                <option value={50}>50% (0.5 Core)</option>
-                <option value={100}>100% (1 Core)</option>
-                <option value={200}>200% (2 Cores)</option>
-                <option value={400}>400% (4 Cores)</option>
+                {cpuOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <label htmlFor="srv-port-edit" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                Port Internal
+              </label>
+              <input
+                id="srv-port-edit"
+                type="number"
+                min={1024}
+                max={65535}
+                value={portInput}
+                onChange={(e) => setPortInput(e.target.value)}
+                className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
+              />
             </div>
           </div>
         </div>
@@ -223,34 +308,15 @@ export default function ServerSettingsTab({
           Tindakan ini permanen dan akan menghapus seluruh file server serta menghentikan proses yang berjalan.
         </p>
 
-        {!confirmDelete ? (
-          <button
-            type="button"
-            onClick={() => setConfirmDelete(true)}
-            className="h-8 px-3.5 rounded border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Hapus Server Ini</span>
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={deleting}
-              onClick={handleDelete}
-              className="h-8 px-3.5 rounded bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium cursor-pointer"
-            >
-              {deleting ? 'Menghapus...' : `Konfirmasi Hapus "${server.name}"`}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(false)}
-              className="h-8 px-3 rounded border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer"
-            >
-              Batal
-            </button>
-          </div>
-        )}
+        <button
+          type="button"
+          disabled={deleting}
+          onClick={handleDelete}
+          className="h-8 px-3.5 rounded border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-50 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>{deleting ? 'Menghapus...' : 'Hapus Server Ini'}</span>
+        </button>
       </div>
     </div>
   );

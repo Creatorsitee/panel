@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'nodal-panel',
+      name: 'cmnty-panel',
       script: 'npm',
       args: 'run start -- -p 3000 -H 0.0.0.0',
       cwd: __dirname,

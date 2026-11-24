@@ -75,6 +75,10 @@ export interface HostVpsInfo {
   totalMemoryMb: number;
   freeMemoryMb: number;
   usedMemoryMb: number;
+  allocatedMemoryMb: number;
+  allocatedCpuPercent: number;
+  availableMemoryMb: number;
+  availableCpuPercent: number;
   uptimeSeconds: number;
   nodeVersion: string;
   pythonVersion: string | null;

@@ -304,6 +304,27 @@ export function allocateNextPort(usedPorts: number[], startPort = 4001, maxPort 
 }
 
 /**
+ * Validates a custom internal TCP port for a server (supports NAT VPS forwarded ports).
+ */
+export function validateServerPort(
+  portInput: unknown,
+  usedPorts: number[],
+  panelPort = Number(process.env.PORT) || 3000
+): number {
+  const parsed = Number(portInput);
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+    throw new Error('Port internal harus berupa angka bulat antara 1024 hingga 65535.');
+  }
+  if (parsed === panelPort) {
+    throw new Error(`Port ${parsed} sedang digunakan oleh panel cmnty.`);
+  }
+  if (usedPorts.includes(parsed)) {
+    throw new Error(`Port ${parsed} sudah digunakan oleh server lain.`);
+  }
+  return parsed;
+}
+
+/**
  * Validates email and server name inputs.
  */
 export function validateEmail(email: string): string {

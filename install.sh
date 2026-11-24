@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Nodal Panel — Automated VPS Installer (Ubuntu / Debian)
-# Usage: git clone <your-repo-url> nodal-panel && cd nodal-panel && sudo bash install.sh
+# cmnty — Automated VPS Installer (Ubuntu / Debian)
+# Usage: git clone <your-repo-url> cmnty && cd cmnty && sudo bash install.sh
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Harap jalankan skrip ini sebagai root atau gunakan sudo: sudo bash install.sh"
@@ -11,7 +11,7 @@ fi
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_PORT="${PORT:-3000}"
-SERVICE_NAME="nodal-panel"
+SERVICE_NAME="cmnty-panel"
 
 echo "==> [1/6] Memperbarui paket sistem & memasang dependensi dasar (git, curl, python3, pip3)..."
 export DEBIAN_FRONTEND=noninteractive
@@ -50,7 +50,7 @@ mkdir -p "${APP_DIR}/data/servers"
 echo "==> [5/6] Menyiapkan layanan systemd (${SERVICE_NAME})..."
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=Nodal Panel - Node.js & Python VPS Server Manager
+Description=cmnty - Node.js & Python Self-Hosted Server Manager
 After=network.target
 
 [Service]
@@ -73,7 +73,7 @@ systemctl restart "${SERVICE_NAME}"
 echo "==> [6/6] Selesai!"
 PUBLIC_IP="$(hostname -I | awk '{print $1}')"
 echo "---------------------------------------------------------"
-echo "Nodal Panel aktif di: http://${PUBLIC_IP}:${APP_PORT}"
+echo "cmnty aktif di      : http://${PUBLIC_IP}:${APP_PORT}"
 echo "Status layanan      : systemctl status ${SERVICE_NAME}"
 echo "Log real-time       : journalctl -u ${SERVICE_NAME} -f"
 echo "---------------------------------------------------------"

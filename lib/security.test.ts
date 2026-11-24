@@ -8,18 +8,19 @@ import {
   isValidEnvKey,
   validateEmail,
   validateServerName,
+  validateServerPort,
   allocateNextPort,
 } from './security';
 
 test('resolveSafePath allows paths strictly inside base directory', () => {
-  const base = '/tmp/nodal-test/server-1';
+  const base = '/tmp/cmnty-test/server-1';
   assert.equal(resolveSafePath(base, ''), path.resolve(base));
   assert.equal(resolveSafePath(base, 'index.js'), path.resolve(base, 'index.js'));
   assert.equal(resolveSafePath(base, 'src/routes/api.ts'), path.resolve(base, 'src/routes/api.ts'));
 });
 
 test('resolveSafePath blocks directory traversal attempts', () => {
-  const base = '/tmp/nodal-test/server-1';
+  const base = '/tmp/cmnty-test/server-1';
   assert.throws(() => resolveSafePath(base, '../server-2/secret.txt'));
   assert.throws(() => resolveSafePath(base, '../../etc/passwd'));
 });
@@ -108,7 +109,11 @@ test('validateEmail and validateServerName sanitize inputs', () => {
   assert.throws(() => validateServerName('bad/name'));
 });
 
-test('allocateNextPort picks first free port', () => {
+test('allocateNextPort and validateServerPort validate internal server ports', () => {
   assert.equal(allocateNextPort([4001, 4002]), 4003);
   assert.equal(allocateNextPort([4002]), 4001);
+  assert.equal(validateServerPort(8080, [4001, 4002], 3000), 8080);
+  assert.throws(() => validateServerPort(3000, [4001], 3000));
+  assert.throws(() => validateServerPort(4001, [4001], 3000));
+  assert.throws(() => validateServerPort(80, [], 3000));
 });

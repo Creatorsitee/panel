@@ -16,6 +16,13 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { apiFetch } from './api-client';
+import { FileEditorSkeleton, FileManagerSkeleton } from './Skeletons';
+import {
+  showConfirmDialog,
+  showErrorAlert,
+  showSuccessToast,
+  showWarningAlert,
+} from '@/lib/swal';
 import type { FileEntry } from '@/lib/types';
 
 interface ServerFilesTabProps {
@@ -61,14 +68,13 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState(false);
   const [fileContent, setFileContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [newEntryName, setNewEntryName] = useState('');
   const [newEntryType, setNewEntryType] = useState<'file' | 'directory' | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const [activeMenuPath, setActiveMenuPath] = useState<string | null>(null);
   const [moveModalPath, setMoveModalPath] = useState<string | null>(null);
@@ -78,15 +84,18 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
 
   const loadDirectory = useCallback(
     async (dirPath: string) => {
+      setLoadingList(true);
       try {
         const res = await apiFetch<{ path: string; entries: FileEntry[] }>(
           `/api/servers/${serverId}/files?mode=list&path=${encodeURIComponent(dirPath)}`
         );
         setEntries(res.entries);
         setCurrentDir(dirPath);
-        setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Gagal memuat daftar file.');
+        await showErrorAlert(
+          'Gagal Memuat Direktori',
+          err instanceof Error ? err.message : 'Gagal memuat daftar file.'
+        );
       } finally {
         setLoadingList(false);
       }
@@ -97,6 +106,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   useEffect(() => {
     let active = true;
     async function init() {
+      setLoadingList(true);
       try {
         const res = await apiFetch<{ path: string; entries: FileEntry[] }>(
           `/api/servers/${serverId}/files?mode=list&path=`
@@ -107,7 +117,10 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         }
       } catch (err) {
         if (active) {
-          setError(err instanceof Error ? err.message : 'Gagal memuat daftar file.');
+          await showErrorAlert(
+            'Gagal Memuat File',
+            err instanceof Error ? err.message : 'Gagal memuat daftar file.'
+          );
         }
       } finally {
         if (active) setLoadingList(false);
@@ -121,28 +134,34 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
 
   async function openFile(filePath: string) {
     if (!isEditableFile(filePath)) {
-      setError(`File "${filePath}" adalah format biner/arsip dan tidak dapat diedit sebagai teks.`);
+      await showWarningAlert(
+        'Format Tidak Didukung',
+        `File "${filePath}" adalah format biner/arsip dan tidak dapat diedit sebagai teks.`
+      );
       return;
     }
-    setError(null);
-    setNotice(null);
+    setSelectedFile(filePath);
+    setLoadingFile(true);
     try {
       const res = await apiFetch<{ content: string }>(
         `/api/servers/${serverId}/files?mode=read&path=${encodeURIComponent(filePath)}`
       );
-      setSelectedFile(filePath);
       setFileContent(res.content);
       setSavedContent(res.content);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal membuka file.');
+      setSelectedFile(null);
+      await showErrorAlert(
+        'Gagal Membuka File',
+        err instanceof Error ? err.message : 'Gagal membuka file.'
+      );
+    } finally {
+      setLoadingFile(false);
     }
   }
 
   async function saveCurrentFile() {
     if (!selectedFile) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       await apiFetch(`/api/servers/${serverId}/files`, {
         method: 'POST',
@@ -153,10 +172,13 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         }),
       });
       setSavedContent(fileContent);
-      setNotice(`Disimpan: ${selectedFile}`);
-      loadDirectory(currentDir);
+      void showSuccessToast('File disimpan', selectedFile);
+      void loadDirectory(currentDir);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal menyimpan file.');
+      await showErrorAlert(
+        'Gagal Menyimpan File',
+        err instanceof Error ? err.message : 'Gagal menyimpan file.'
+      );
     } finally {
       setSaving(false);
     }
@@ -165,7 +187,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   async function handleCreateEntry(e: React.FormEvent) {
     e.preventDefault();
     if (!newEntryName.trim() || !newEntryType) return;
-    setError(null);
     const fullPath = currentDir
       ? `${currentDir}/${newEntryName.trim()}`
       : newEntryName.trim();
@@ -182,18 +203,33 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       setNewEntryName('');
       const createdType = newEntryType;
       setNewEntryType(null);
+      void showSuccessToast(
+        createdType === 'file' ? 'File dibuat' : 'Folder dibuat',
+        fullPath
+      );
       await loadDirectory(currentDir);
       if (createdType === 'file') {
-        openFile(fullPath);
+        void openFile(fullPath);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal membuat item.');
+      await showErrorAlert(
+        'Gagal Membuat Item',
+        err instanceof Error ? err.message : 'Gagal membuat item.'
+      );
     }
   }
 
   async function handleDeleteEntry(entryPath: string) {
-    setError(null);
     setActiveMenuPath(null);
+    const confirmed = await showConfirmDialog({
+      title: `Hapus "${entryPath}"?`,
+      text: 'Item yang dihapus tidak dapat dikembalikan.',
+      confirmText: 'Ya, Hapus',
+      cancelText: 'Batal',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
     try {
       await apiFetch(
         `/api/servers/${serverId}/files?path=${encodeURIComponent(entryPath)}`,
@@ -204,15 +240,17 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         setFileContent('');
         setSavedContent('');
       }
-      loadDirectory(currentDir);
+      void showSuccessToast('Berhasil dihapus', entryPath);
+      await loadDirectory(currentDir);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal menghapus.');
+      await showErrorAlert(
+        'Gagal Menghapus',
+        err instanceof Error ? err.message : 'Gagal menghapus item.'
+      );
     }
   }
 
   async function handleExtractZip(entryPath: string) {
-    setError(null);
-    setNotice(null);
     setActiveMenuPath(null);
     try {
       await apiFetch(`/api/servers/${serverId}/files`, {
@@ -222,33 +260,38 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
           path: entryPath,
         }),
       });
-      setNotice(`Berhasil mengekstrak ${entryPath}`);
-      loadDirectory(currentDir);
+      void showSuccessToast('Arsip ZIP diekstrak', entryPath);
+      await loadDirectory(currentDir);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal mengekstrak ZIP.');
+      await showErrorAlert(
+        'Gagal Mengekstrak ZIP',
+        err instanceof Error ? err.message : 'Gagal mengekstrak ZIP.'
+      );
     }
   }
 
   async function handleMoveEntry(e: React.FormEvent) {
     e.preventDefault();
     if (!moveModalPath || !newDestPath.trim()) return;
-    setError(null);
-    setNotice(null);
+    const destination = newDestPath.trim();
     try {
       await apiFetch(`/api/servers/${serverId}/files`, {
         method: 'POST',
         body: JSON.stringify({
           action: 'move',
           path: moveModalPath,
-          newPath: newDestPath.trim(),
+          newPath: destination,
         }),
       });
-      setNotice(`Berhasil memindahkan ke ${newDestPath}`);
+      void showSuccessToast('Berhasil dipindahkan', destination);
       setMoveModalPath(null);
       setNewDestPath('');
-      loadDirectory(currentDir);
+      await loadDirectory(currentDir);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal memindahkan file/folder.');
+      await showErrorAlert(
+        'Gagal Memindahkan Item',
+        err instanceof Error ? err.message : 'Gagal memindahkan file/folder.'
+      );
     }
   }
 
@@ -256,8 +299,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
     setUploading(true);
-    setError(null);
-    setNotice(null);
     let uploadedCount = 0;
 
     try {
@@ -277,10 +318,13 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         });
         uploadedCount += 1;
       }
-      setNotice(`${uploadedCount} file berhasil diunggah.`);
+      void showSuccessToast('Upload selesai', `${uploadedCount} file berhasil diunggah.`);
       await loadDirectory(currentDir);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal mengunggah file.');
+      await showErrorAlert(
+        'Gagal Mengunggah File',
+        err instanceof Error ? err.message : 'Gagal mengunggah file.'
+      );
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -291,7 +335,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     if (!currentDir) return;
     const parts = currentDir.split('/');
     parts.pop();
-    loadDirectory(parts.join('/'));
+    void loadDirectory(parts.join('/'));
   }
 
   const hasUnsavedChanges = selectedFile !== null && fileContent !== savedContent;
@@ -423,18 +467,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         </form>
       )}
 
-      {error && (
-        <div role="alert" className="p-3 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-500 font-medium">
-          {error}
-        </div>
-      )}
-
-      {notice && (
-        <div className="p-3 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-500 font-medium">
-          {notice}
-        </div>
-      )}
-
       {/* Full Card View when File is Selected vs File List */}
       {selectedFile ? (
         <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-[#09090B] flex flex-col shadow-xl">
@@ -458,7 +490,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
 
             <button
               type="button"
-              disabled={saving || !hasUnsavedChanges}
+              disabled={saving || loadingFile || !hasUnsavedChanges}
               onClick={saveCurrentFile}
               className="h-7 px-3 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
             >
@@ -467,28 +499,28 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             </button>
           </div>
 
-          <textarea
-            aria-label={`Editor kode untuk ${selectedFile}`}
-            value={fileContent}
-            onChange={(e) => setFileContent(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-                e.preventDefault();
-                if (hasUnsavedChanges) saveCurrentFile();
-              }
-            }}
-            spellCheck={false}
-            className="w-full flex-1 min-h-[520px] p-4 bg-[#09090B] text-zinc-100 font-mono text-xs leading-relaxed focus:outline-none resize-none"
-          />
+          {loadingFile ? (
+            <FileEditorSkeleton />
+          ) : (
+            <textarea
+              aria-label={`Editor kode untuk ${selectedFile}`}
+              value={fileContent}
+              onChange={(e) => setFileContent(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+                  e.preventDefault();
+                  if (hasUnsavedChanges) saveCurrentFile();
+                }
+              }}
+              spellCheck={false}
+              className="w-full flex-1 min-h-[520px] p-4 bg-[#09090B] text-zinc-100 font-mono text-xs leading-relaxed focus:outline-none resize-none"
+            />
+          )}
         </div>
       ) : (
         <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-[#0c0c0e] flex flex-col shadow-sm">
-          <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
-            Struktur Direktori File Explorer
-          </div>
-
           {loadingList ? (
-            <div className="p-6 text-xs font-mono text-zinc-500">Memuat file...</div>
+            <FileManagerSkeleton />
           ) : entries.length === 0 ? (
             <div className="p-8 text-xs text-zinc-500 text-center">Direktori ini masih kosong.</div>
           ) : (

@@ -148,6 +148,34 @@ export function readServerDotEnv(serverId: string): Record<string, string> {
   return parseDotEnvContent(content);
 }
 
+export function updateServerDotEnvPort(serverId: string, port: number): void {
+  const baseDir = ensureServerDir(serverId);
+  const envPath = resolveSafePath(baseDir, '.env');
+  if (!fs.existsSync(envPath)) {
+    writeInitialDotEnv(serverId, { PORT: String(port) });
+    return;
+  }
+  assertRealContainment(baseDir, envPath);
+  const raw = fs.readFileSync(envPath, 'utf8');
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
+  let replaced = false;
+  const nextLines = lines.map((line) => {
+    if (/^\s*PORT\s*=/.test(line)) {
+      replaced = true;
+      return `PORT=${port}`;
+    }
+    return line;
+  });
+  if (!replaced) {
+    if (nextLines.length > 0 && nextLines[nextLines.length - 1] === '') {
+      nextLines.splice(nextLines.length - 1, 0, `PORT=${port}`);
+    } else {
+      nextLines.push(`PORT=${port}`);
+    }
+  }
+  fs.writeFileSync(envPath, nextLines.join('\n'), 'utf8');
+}
+
 export function listServerFiles(serverId: string, relDir = ''): FileEntry[] {
   const baseDir = ensureServerDir(serverId);
   const targetDir = resolveSafePath(baseDir, relDir);

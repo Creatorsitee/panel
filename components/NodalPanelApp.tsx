@@ -23,6 +23,8 @@ import CreateServerModal from './CreateServerModal';
 import ServerConsoleTab from './ServerConsoleTab';
 import ServerFilesTab from './ServerFilesTab';
 import ServerSettingsTab from './ServerSettingsTab';
+import { DashboardContentSkeleton, WorkspaceBootSkeleton } from './Skeletons';
+import { showInfoToast } from '@/lib/swal';
 import type {
   HostVpsInfo,
   PublicUser,
@@ -172,6 +174,7 @@ export default function NodalPanelApp() {
     setUser(null);
     setServers([]);
     setActiveServerId(null);
+    void showInfoToast('Berhasil keluar');
   }
 
   const activeServer = useMemo(
@@ -207,6 +210,7 @@ export default function NodalPanelApp() {
 
   function handleServerUpdated(updated: ServerWithMetrics) {
     setServers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    void loadWorkspaceData();
   }
 
   function handleServerDeleted(serverId: string) {
@@ -214,18 +218,27 @@ export default function NodalPanelApp() {
     if (activeServerId === serverId) {
       setActiveServerId(null);
     }
+    void loadWorkspaceData();
+  }
+
+  function openCreateModal() {
+    setCreateOpen(true);
+    void loadWorkspaceData();
   }
 
   if (checkingAuth) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-[#09090B] flex items-center justify-center text-xs font-mono text-zinc-500">
-        Memuat...
-      </div>
-    );
+    return <WorkspaceBootSkeleton />;
   }
 
   if (!user) {
-    return <AuthScreen onAuthenticated={(u) => setUser(u)} />;
+    return (
+      <AuthScreen
+        onAuthenticated={(u) => {
+          setLoadingData(true);
+          setUser(u);
+        }}
+      />
+    );
   }
 
   const serverTabs: { id: ServerTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -262,7 +275,7 @@ export default function NodalPanelApp() {
             }}
             className="text-sm font-bold tracking-tight uppercase cursor-pointer"
           >
-            Nodal Panel
+            cmnty
           </button>
 
           <button
@@ -441,7 +454,7 @@ export default function NodalPanelApp() {
             ) : (
               <button
                 type="button"
-                onClick={() => setCreateOpen(true)}
+                onClick={openCreateModal}
                 className="h-8 px-3.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 text-xs font-medium inline-flex items-center gap-1.5 transition-opacity cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -498,14 +511,17 @@ export default function NodalPanelApp() {
                 <ServerSettingsTab
                   key={activeServer.id}
                   server={activeServer}
+                  hostInfo={hostInfo}
                   onUpdated={handleServerUpdated}
                   onDeleted={handleServerDeleted}
                 />
               )}
             </div>
+          ) : loadingData && servers.length === 0 ? (
+            <DashboardContentSkeleton />
           ) : (
             <div className="space-y-6">
-              {/* Host VPS Stats Bar (No Refresh Button) */}
+              {/* Host VPS Stats Bar */}
               <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-200 dark:border-zinc-800">
                   <div className="flex items-center gap-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider">
@@ -579,11 +595,7 @@ export default function NodalPanelApp() {
               </div>
 
               {/* Server Cards Grid */}
-              {loadingData && servers.length === 0 ? (
-                <div className="py-12 text-center text-xs font-mono text-zinc-500">
-                  Memuat daftar server...
-                </div>
-              ) : filteredServers.length === 0 ? (
+              {filteredServers.length === 0 ? (
                 <div className="py-16 px-4 rounded-lg border border-zinc-200 dark:border-zinc-800 text-center space-y-3 bg-zinc-50/40 dark:bg-zinc-900/20">
                   <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
                     {servers.length === 0 ? 'Belum ada server yang dibuat' : 'Tidak ada server yang cocok'}
@@ -595,7 +607,7 @@ export default function NodalPanelApp() {
                     <div className="pt-2">
                       <button
                         type="button"
-                        onClick={() => setCreateOpen(true)}
+                        onClick={openCreateModal}
                         className="h-8 px-4 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -684,11 +696,13 @@ export default function NodalPanelApp() {
 
       <CreateServerModal
         open={createOpen}
+        hostInfo={hostInfo}
         onClose={() => setCreateOpen(false)}
         onCreated={(created) => {
           setServers((prev) => [created, ...prev]);
           setActiveServerId(created.id);
           setServerTab('console');
+          void loadWorkspaceData();
         }}
       />
     </div>

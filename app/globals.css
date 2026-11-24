@@ -6,6 +6,103 @@
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+@keyframes cmnty-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: rgba(228, 228, 231, 0.78);
+}
+
+.dark .skeleton-shimmer {
+  background-color: rgba(39, 39, 42, 0.72);
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.65) 50%,
+    transparent 100%
+  );
+  animation: cmnty-shimmer 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+.dark .skeleton-shimmer::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.085) 50%,
+    transparent 100%
+  );
+}
+
+/* SweetAlert2 Theme Harmonization */
+.cmnty-swal-popup {
+  border-radius: 0.65rem !important;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+  border: 1px solid #e4e4e7 !important;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.18) !important;
+}
+
+.dark .cmnty-swal-popup {
+  background: #141920 !important;
+  color: #f4f4f5 !important;
+  border-color: #2c3746 !important;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.6) !important;
+}
+
+.cmnty-swal-title {
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.cmnty-swal-html {
+  font-size: 0.8rem !important;
+  line-height: 1.45 !important;
+  color: #52525b !important;
+}
+
+.dark .cmnty-swal-html {
+  color: #a1a1aa !important;
+}
+
+.cmnty-swal-toast {
+  border-radius: 0.55rem !important;
+  border: 1px solid #e4e4e7 !important;
+  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.16) !important;
+  padding: 0.65rem 0.9rem !important;
+  max-width: 360px !important;
+}
+
+.cmnty-swal-toast .cmnty-swal-title {
+  font-size: 0.85rem !important;
+}
+
+.cmnty-swal-toast .cmnty-swal-html {
+  font-size: 0.75rem !important;
+  margin-top: 0.15rem !important;
+}
+
+.dark .cmnty-swal-toast {
+  background: #1b222c !important;
+  color: #f4f4f5 !important;
+  border-color: #344050 !important;
+}
+
 @layer base {
   html {
     color-scheme: dark;

@@ -1,18 +1,27 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { apiFetch } from './api-client';
-import type { ServerRuntime, ServerWithMetrics } from '@/lib/types';
+import { showErrorAlert, showSuccessToast, showWarningAlert } from '@/lib/swal';
+import {
+  getDefaultCpuPercent,
+  getDefaultMemoryMb,
+  getVpsCpuOptions,
+  getVpsMemoryOptions,
+} from '@/lib/vps-specs';
+import type { HostVpsInfo, ServerRuntime, ServerWithMetrics } from '@/lib/types';
 
 interface CreateServerModalProps {
   open: boolean;
+  hostInfo: HostVpsInfo | null;
   onClose: () => void;
   onCreated: (server: ServerWithMetrics) => void;
 }
 
 export default function CreateServerModal({
   open,
+  hostInfo,
   onClose,
   onCreated,
 }: CreateServerModalProps) {
@@ -20,11 +29,37 @@ export default function CreateServerModal({
   const [description, setDescription] = useState('');
   const [runtime, setRuntime] = useState<ServerRuntime>('nodejs');
   const [startupCommand, setStartupCommand] = useState('node index.js');
-  const [memoryLimitMb, setMemoryLimitMb] = useState(512);
-  const [cpuLimitPercent, setCpuLimitPercent] = useState(100);
+  const [customPort, setCustomPort] = useState('');
+  const [selectedMemoryMb, setSelectedMemoryMb] = useState<number | null>(null);
+  const [selectedCpuPercent, setSelectedCpuPercent] = useState<number | null>(null);
   const [autoRestart, setAutoRestart] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const memoryOptions = useMemo(() => getVpsMemoryOptions(hostInfo, 0), [hostInfo]);
+  const cpuOptions = useMemo(() => getVpsCpuOptions(hostInfo, 0), [hostInfo]);
+
+  const defaultMemoryMb = getDefaultMemoryMb(hostInfo);
+  const defaultCpuPercent = getDefaultCpuPercent(hostInfo);
+
+  const memoryLimitMb =
+    selectedMemoryMb !== null && memoryOptions.some((o) => o.value === selectedMemoryMb)
+      ? selectedMemoryMb
+      : defaultMemoryMb;
+  const cpuLimitPercent =
+    selectedCpuPercent !== null && cpuOptions.some((o) => o.value === selectedCpuPercent)
+      ? selectedCpuPercent
+      : defaultCpuPercent;
+
+  const resourceUnavailable = memoryOptions.length === 0 || cpuOptions.length === 0;
+
+  useEffect(() => {
+    if (open && resourceUnavailable) {
+      void showWarningAlert(
+        'Resource VPS Penuh',
+        'Sisa memori atau batas CPU VPS sudah habis digunakan oleh server aktif lainnya. Hentikan atau kurangi batas resource server lain terlebih dahulu.'
+      );
+    }
+  }, [open, resourceUnavailable]);
 
   if (!open) return null;
 
@@ -35,9 +70,16 @@ export default function CreateServerModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    if (resourceUnavailable) {
+      await showWarningAlert(
+        'Resource VPS Penuh',
+        'Sisa memori atau batas CPU VPS sudah habis digunakan.'
+      );
+      return;
+    }
     setSubmitting(true);
     try {
+      const parsedPort = customPort.trim() ? Number(customPort.trim()) : undefined;
       const res = await apiFetch<{ server: ServerWithMetrics }>(
         '/api/servers',
         {
@@ -47,6 +89,7 @@ export default function CreateServerModal({
             description,
             runtime,
             startupCommand,
+            ...(parsedPort !== undefined ? { port: parsedPort } : {}),
             memoryLimitMb,
             cpuLimitPercent,
             autoRestart,
@@ -57,11 +100,21 @@ export default function CreateServerModal({
       setDescription('');
       setRuntime('nodejs');
       setStartupCommand('node index.js');
+      setCustomPort('');
+      setSelectedMemoryMb(null);
+      setSelectedCpuPercent(null);
       setAutoRestart(false);
+      void showSuccessToast(
+        'Server berhasil dibuat',
+        `${res.server.name} siap pada Port :${res.server.port}`
+      );
       onCreated(res.server);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal membuat server.');
+      await showErrorAlert(
+        'Gagal Membuat Server',
+        err instanceof Error ? err.message : 'Gagal membuat server.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -163,20 +216,39 @@ export default function CreateServerModal({
 
             <div className="space-y-1.5">
               <label
-                htmlFor="srv-desc"
+                htmlFor="srv-port"
                 className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
               >
-                Catatan (Opsional)
+                Port Internal (Opsional)
               </label>
               <input
-                id="srv-desc"
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="REST API atau worker"
-                className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-sm focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
+                id="srv-port"
+                type="number"
+                min={1024}
+                max={65535}
+                value={customPort}
+                onChange={(e) => setCustomPort(e.target.value)}
+                placeholder="Otomatis (mis. 8080)"
+                className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
               />
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor="srv-desc"
+              className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              Catatan (Opsional)
+            </label>
+            <input
+              id="srv-desc"
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="REST API atau worker"
+              className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-sm focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -190,14 +262,19 @@ export default function CreateServerModal({
               <select
                 id="srv-mem"
                 value={memoryLimitMb}
-                onChange={(e) => setMemoryLimitMb(Number(e.target.value))}
-                className="w-full h-9 px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
+                disabled={memoryOptions.length === 0}
+                onChange={(e) => setSelectedMemoryMb(Number(e.target.value))}
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400 disabled:opacity-50"
               >
-                <option value={256}>256 MB</option>
-                <option value={512}>512 MB</option>
-                <option value={1024}>1024 MB</option>
-                <option value={2048}>2048 MB</option>
-                <option value={4096}>4096 MB</option>
+                {memoryOptions.length === 0 ? (
+                  <option value={0}>Memori tersedia habis</option>
+                ) : (
+                  memoryOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -211,13 +288,19 @@ export default function CreateServerModal({
               <select
                 id="srv-cpu"
                 value={cpuLimitPercent}
-                onChange={(e) => setCpuLimitPercent(Number(e.target.value))}
-                className="w-full h-9 px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
+                disabled={cpuOptions.length === 0}
+                onChange={(e) => setSelectedCpuPercent(Number(e.target.value))}
+                className="w-full h-9 px-3 rounded-md bg-white dark:bg-[#09090B] border border-zinc-300 dark:border-zinc-800 text-xs font-mono focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400 disabled:opacity-50"
               >
-                <option value={50}>50%</option>
-                <option value={100}>100%</option>
-                <option value={200}>200%</option>
-                <option value={400}>400%</option>
+                {cpuOptions.length === 0 ? (
+                  <option value={0}>Batas CPU habis</option>
+                ) : (
+                  cpuOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -229,17 +312,8 @@ export default function CreateServerModal({
               onChange={(e) => setAutoRestart(e.target.checked)}
               className="w-3.5 h-3.5 rounded border-zinc-300 dark:border-zinc-700"
             />
-            <span>Auto-restart saat proses berhenti dengan error</span>
+            <span>Auto-restart saat proses berhenti</span>
           </label>
-
-          {error && (
-            <div
-              role="alert"
-              className="p-2.5 rounded-md border border-red-500/30 bg-red-500/5 text-xs text-red-600 dark:text-red-400"
-            >
-              {error}
-            </div>
-          )}
 
           <div className="pt-3 flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800">
             <button
@@ -251,7 +325,7 @@ export default function CreateServerModal({
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || resourceUnavailable}
               className="h-9 px-4 rounded-md bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 hover:opacity-90 disabled:opacity-50 text-xs font-medium transition-opacity cursor-pointer whitespace-nowrap"
             >
               {submitting ? 'Membuat...' : 'Buat Server'}

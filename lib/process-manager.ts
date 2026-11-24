@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { getServerById } from './db';
+import { getServerById, listAllServers } from './db';
 import { ensureServerDir, readServerDotEnv, verifyServerScriptFile } from './file-manager';
 import { parseSafeStartupCommand } from './security';
 import type { ConsoleLine, HostVpsInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
@@ -137,8 +137,8 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
         if (state.lastCpuJiffies !== undefined && state.lastSampleTimeMs !== undefined) {
           const deltaMs = Math.max(100, now - state.lastSampleTimeMs);
           const deltaJiffies = Math.max(0, totalJiffies - state.lastCpuJiffies);
-          // Linux USER_HZ is typically 100 jiffies/sec -> 10ms per jiffy
-          cpuPercent = Number(Math.min(100 * os.cpus().length, ((deltaJiffies * 10) / deltaMs) * 100).toFixed(1));
+          const effectiveCores = detectEffectiveCpuCores(os.cpus().length);
+          cpuPercent = Number(Math.min(100 * effectiveCores, ((deltaJiffies * 10) / deltaMs) * 100).toFixed(2));
         }
         state.lastCpuJiffies = totalJiffies;
         state.lastSampleTimeMs = now;
@@ -154,7 +154,7 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
       appendLog(
         state.serverId,
         'stderr',
-        `[Nodal OOM] Memori (${memoryMb} MB) melebihi batas ${server.memoryLimitMb} MB. Menghentikan proses...`
+        `[cmnty Daemon] Memori (${memoryMb} MB) melebihi batas ${server.memoryLimitMb} MB. Menghentikan proses...`
       );
       state.child.kill('SIGKILL');
     }
@@ -293,7 +293,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       state.status = 'error';
       emitStatus(server.id);
       const msg = 'File package.json tidak valid (format JSON rusak).';
-      appendLog(server.id, 'stderr', `[Nodal Error] ${msg}`);
+      appendLog(server.id, 'stderr', `[cmnty Daemon] ${msg}`);
       throw new Error(msg);
     }
 
@@ -315,7 +315,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       state.status = 'error';
       emitStatus(server.id);
       const msg = err instanceof Error ? err.message : 'Instalasi package.json gagal.';
-      appendLog(server.id, 'stderr', `[Nodal Error] ${msg}`);
+      appendLog(server.id, 'stderr', `[cmnty Daemon] ${msg}`);
       throw new Error(msg);
     }
     return;
@@ -402,7 +402,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
     state.status = 'error';
     emitStatus(server.id);
     const msg = err instanceof Error ? err.message : 'Instalasi requirements.txt gagal.';
-    appendLog(server.id, 'stderr', `[Nodal Error] ${msg}`);
+    appendLog(server.id, 'stderr', `[cmnty Daemon] ${msg}`);
     throw new Error(msg);
   }
 }
@@ -467,7 +467,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
     state.status = 'error';
     emitStatus(serverId);
     const msg = err instanceof Error ? err.message : 'Script startup tidak valid.';
-    appendLog(serverId, 'stderr', `[Nodal Error] ${msg}`);
+    appendLog(serverId, 'stderr', `[cmnty Daemon] ${msg}`);
     throw err;
   }
 
@@ -515,7 +515,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   });
 
   child.on('error', (err) => {
-    appendLog(serverId, 'stderr', `[Nodal] Gagal menjalankan proses: ${err.message}`);
+    appendLog(serverId, 'stderr', `[cmnty Daemon] Gagal menjalankan proses: ${err.message}`);
     state.status = 'error';
     state.child = null;
     state.pid = null;
@@ -546,7 +546,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
         const current = getOrCreateState(serverId);
         if (current.status === 'error' || current.status === 'stopped') {
           startServerProcess(serverId).catch((err) => {
-            appendLog(serverId, 'stderr', `[Nodal] Auto-restart gagal: ${err.message}`);
+            appendLog(serverId, 'stderr', `[cmnty Daemon] Auto-restart gagal: ${err.message}`);
           });
         }
       }, 2000);
@@ -633,27 +633,157 @@ function getSystemVersions(): { pythonVersion: string | null } {
   return globalForPm.__nodalSystemVersions;
 }
 
+function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
+  const osTotalMb = Math.round(os.totalmem() / 1024 / 1024);
+  let osFreeMb = Math.round(os.freemem() / 1024 / 1024);
+
+  try {
+    if (fs.existsSync('/proc/meminfo')) {
+      const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
+      const availMatch = /^MemAvailable:\s+(\d+)\s+kB/m.exec(meminfo);
+      if (availMatch) {
+        osFreeMb = Math.round(Number(availMatch[1]) / 1024);
+      }
+    }
+  } catch {
+    // fallback to os.freemem()
+  }
+
+  try {
+    // cgroup v2 memory limit & usage
+    if (fs.existsSync('/sys/fs/cgroup/memory.max')) {
+      const rawMax = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
+      const parsedMax = Number(rawMax);
+      if (Number.isFinite(parsedMax) && parsedMax > 0) {
+        const limitMb = Math.round(parsedMax / 1024 / 1024);
+        if (limitMb > 0 && limitMb < osTotalMb) {
+          let usedMb = osTotalMb - osFreeMb;
+          if (fs.existsSync('/sys/fs/cgroup/memory.current')) {
+            const rawCur = Number(
+              fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8').trim()
+            );
+            if (Number.isFinite(rawCur) && rawCur >= 0) {
+              usedMb = Math.round(rawCur / 1024 / 1024);
+            }
+          }
+          return {
+            totalMemMb: limitMb,
+            freeMemMb: Math.max(0, limitMb - usedMb),
+          };
+        }
+      }
+    }
+
+    // cgroup v1 memory limit & usage
+    if (fs.existsSync('/sys/fs/cgroup/memory/memory.limit_in_bytes')) {
+      const rawMax = Number(
+        fs
+          .readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8')
+          .trim()
+      );
+      if (Number.isFinite(rawMax) && rawMax > 0) {
+        const limitMb = Math.round(rawMax / 1024 / 1024);
+        if (limitMb > 0 && limitMb < osTotalMb) {
+          let usedMb = osTotalMb - osFreeMb;
+          if (fs.existsSync('/sys/fs/cgroup/memory/memory.usage_in_bytes')) {
+            const rawCur = Number(
+              fs
+                .readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8')
+                .trim()
+            );
+            if (Number.isFinite(rawCur) && rawCur >= 0) {
+              usedMb = Math.round(rawCur / 1024 / 1024);
+            }
+          }
+          return {
+            totalMemMb: limitMb,
+            freeMemMb: Math.max(0, limitMb - usedMb),
+          };
+        }
+      }
+    }
+  } catch {
+    // fallback to os.totalmem()
+  }
+
+  return { totalMemMb: osTotalMb, freeMemMb: osFreeMb };
+}
+
+function detectEffectiveCpuCores(hostCpuCount: number): number {
+  const baseCores = hostCpuCount || 1;
+  try {
+    if (fs.existsSync('/sys/fs/cgroup/cpu.max')) {
+      const parts = fs
+        .readFileSync('/sys/fs/cgroup/cpu.max', 'utf8')
+        .trim()
+        .split(/\s+/);
+      if (parts.length >= 2 && parts[0] !== 'max') {
+        const quota = Number(parts[0]);
+        const period = Number(parts[1]);
+        if (Number.isFinite(quota) && Number.isFinite(period) && period > 0) {
+          return Math.max(1, Math.min(baseCores, Math.round(quota / period)));
+        }
+      }
+    }
+  } catch {
+    // fallback to os.cpus()
+  }
+  return baseCores;
+}
+
 export function getHostVpsInfo(): HostVpsInfo {
-  const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
-  const freeMemMb = Math.round(os.freemem() / 1024 / 1024);
+  const { totalMemMb, freeMemMb } = detectEffectiveMemoryMb();
   const cpus = os.cpus();
+  const cpuCores = detectEffectiveCpuCores(cpus.length);
   const versions = getSystemVersions();
 
+  const processMap = getProcessMap();
   let activeCount = 0;
-  for (const proc of getProcessMap().values()) {
-    if (proc.status === 'running') activeCount += 1;
+  let activeAllocatedMemoryMb = 0;
+  let activeUsedRssMb = 0;
+  let activeAllocatedCpuPercent = 0;
+
+  const allServers = listAllServers();
+  for (const srv of allServers) {
+    const proc = processMap.get(srv.id);
+    const isActive =
+      proc &&
+      (proc.status === 'running' ||
+        proc.status === 'starting' ||
+        proc.status === 'installing');
+    if (isActive) {
+      if (proc.status === 'running') {
+        activeCount += 1;
+      }
+      const { memoryMb } = readLinuxProcStats(proc);
+      activeUsedRssMb += memoryMb;
+      activeAllocatedMemoryMb += Number.isFinite(srv.memoryLimitMb) ? srv.memoryLimitMb : 0;
+      activeAllocatedCpuPercent += Number.isFinite(srv.cpuLimitPercent) ? srv.cpuLimitPercent : 0;
+    }
   }
+
+  const totalCpuPercent = Math.max(100, cpuCores * 100);
+  const activeExtraReservedMb = Math.max(0, activeAllocatedMemoryMb - Math.round(activeUsedRssMb));
+  const availableMemoryMb = Math.max(
+    0,
+    Math.min(totalMemMb - activeAllocatedMemoryMb, freeMemMb - activeExtraReservedMb)
+  );
+  const availableCpuPercent = Math.max(0, totalCpuPercent - activeAllocatedCpuPercent);
 
   return {
     hostname: os.hostname(),
     platform: `${os.type()} ${os.release()}`,
     arch: os.arch(),
     cpuModel: cpus[0]?.model || 'Virtual CPU',
-    cpuCores: cpus.length || 1,
+    cpuCores,
     loadAvg: os.loadavg().map((n) => Number(n.toFixed(2))) as [number, number, number],
     totalMemoryMb: totalMemMb,
     freeMemoryMb: freeMemMb,
     usedMemoryMb: Math.max(0, totalMemMb - freeMemMb),
+    allocatedMemoryMb: activeAllocatedMemoryMb,
+    allocatedCpuPercent: activeAllocatedCpuPercent,
+    availableMemoryMb,
+    availableCpuPercent,
     uptimeSeconds: Math.floor(os.uptime()),
     nodeVersion: process.version,
     pythonVersion: versions.pythonVersion,

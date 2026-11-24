@@ -47,7 +47,7 @@ export async function GET(
 
       metricsTimer = setInterval(() => {
         sendEvent('metrics', getServerMetrics(id));
-      }, 2000);
+      }, 1000);
 
       cleanup = () => {
         closed = true;

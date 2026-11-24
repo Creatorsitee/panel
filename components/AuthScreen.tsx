@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { apiFetch, setAuthToken } from './api-client';
+import { showErrorAlert, showSuccessToast } from '@/lib/swal';
 import type { PublicUser } from '@/lib/types';
 
 interface AuthScreenProps {
@@ -14,11 +15,9 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
     setLoading(true);
     try {
       const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
@@ -30,9 +29,16 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         body: JSON.stringify(payload),
       });
       setAuthToken(data.token);
+      void showSuccessToast(
+        mode === 'login' ? 'Berhasil masuk' : 'Akun berhasil dibuat',
+        `Selamat datang, ${data.user.name}`
+      );
       onAuthenticated(data.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Autentikasi gagal.');
+      await showErrorAlert(
+        mode === 'login' ? 'Gagal Masuk' : 'Gagal Mendaftar',
+        err instanceof Error ? err.message : 'Autentikasi gagal.'
+      );
     } finally {
       setLoading(false);
     }
@@ -41,7 +47,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   return (
     <div className="min-h-screen bg-white dark:bg-[#09090B] text-zinc-950 dark:text-zinc-100 flex flex-col justify-between px-4 py-8">
       <header className="max-w-sm w-full mx-auto pt-4 flex items-center justify-between">
-        <span className="text-sm font-semibold tracking-tight">nodal</span>
+        <span className="text-sm font-semibold tracking-tight">cmnty</span>
         <span className="text-xs font-mono text-zinc-500">node · python</span>
       </header>
 
@@ -52,8 +58,8 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
             {mode === 'login'
-              ? 'Kelola proses Node.js dan Python langsung di VPS Anda.'
-              : 'Daftar untuk membuat dan menjalankan server di VPS ini.'}
+              ? 'Kelola server Node.js atau Python Anda secara mandiri.'
+              : 'Daftar untuk membuat dan menjalankan server Node.js & Python self host.'}
           </p>
         </div>
 
@@ -66,10 +72,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             type="button"
             role="tab"
             aria-selected={mode === 'login'}
-            onClick={() => {
-              setMode('login');
-              setError(null);
-            }}
+            onClick={() => setMode('login')}
             className={`pb-2.5 text-xs font-medium border-b-2 -mb-px transition-colors cursor-pointer whitespace-nowrap ${
               mode === 'login'
                 ? 'border-zinc-950 dark:border-zinc-100 text-zinc-950 dark:text-zinc-100'
@@ -82,10 +85,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             type="button"
             role="tab"
             aria-selected={mode === 'register'}
-            onClick={() => {
-              setMode('register');
-              setError(null);
-            }}
+            onClick={() => setMode('register')}
             className={`pb-2.5 text-xs font-medium border-b-2 -mb-px transition-colors cursor-pointer whitespace-nowrap ${
               mode === 'register'
                 ? 'border-zinc-950 dark:border-zinc-100 text-zinc-950 dark:text-zinc-100'
@@ -112,7 +112,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 minLength={2}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Budi Santoso"
+                placeholder="Masukkan nama lengkap"
                 className="w-full h-9 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-800 text-sm focus:outline-none focus:border-zinc-950 dark:focus:border-zinc-400"
               />
             </div>
@@ -155,15 +155,6 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             />
           </div>
 
-          {error && (
-            <div
-              role="alert"
-              className="p-2.5 rounded-md border border-red-500/30 bg-red-500/5 text-xs text-red-600 dark:text-red-400"
-            >
-              {error}
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={loading}
@@ -179,7 +170,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       </main>
 
       <footer className="max-w-sm w-full mx-auto pb-2 text-[11px] text-zinc-500 font-mono">
-        Self-hosted VPS Panel
+        Self-hosted Server
       </footer>
     </div>
   );

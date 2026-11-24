@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       user: toPublicUser(user),
       token,
     });
-    attachSessionCookie(res, token);
+    attachSessionCookie(res, token, req);
     return res;
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Gagal masuk ke akun.';
