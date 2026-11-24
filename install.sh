@@ -42,8 +42,19 @@ EOF
 fi
 
 echo "==> [4/6] Memasang dependensi npm dan membangun aplikasi..."
-npm install
-npm run build
+TOTAL_MEM_MB="$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 2048)"
+TOTAL_SWAP_MB="$(awk '/SwapTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+if [ "$TOTAL_MEM_MB" -lt 2048 ] && [ "$TOTAL_SWAP_MB" -lt 512 ] && [ ! -f "/swapfile" ]; then
+  echo "RAM terdeteksi ${TOTAL_MEM_MB} MB, menyiapkan swap 1 GB sementara/permanen agar build lancar..."
+  (fallocate -l 1G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none) && \
+    chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile && \
+    (grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab) || \
+    rm -f /swapfile || true
+fi
+
+rm -rf .next
+npm install --include=dev --include=optional --no-audit --no-fund
+NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" npm run build
 
 mkdir -p "${APP_DIR}/data/servers"
 
@@ -56,6 +67,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${APP_DIR}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=${APP_DIR}/.env
 ExecStart=$(command -v npm) run start -- -p ${APP_PORT} -H 0.0.0.0
 Restart=always
