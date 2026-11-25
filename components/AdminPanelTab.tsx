@@ -426,7 +426,7 @@ export default function AdminPanelTab({
         <div>
           <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-zinc-500">
             <Shield className="w-3.5 h-3.5" />
-            <span>Administrator</span>
+            <span>Manajemen Sistem</span>
           </div>
           <h1 className="text-xl font-bold tracking-tight mt-0.5 text-zinc-900 dark:text-zinc-100">
             {section === 'users' ? 'Kelola User' : 'Kelola Server'}
@@ -437,7 +437,7 @@ export default function AdminPanelTab({
           <div
             className="flex-1 sm:flex-initial flex items-center gap-1 p-1 rounded bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800"
             role="tablist"
-            aria-label="Bagian Panel Admin"
+            aria-label="Bagian Manajemen"
           >
             <Link
               href="/admin/user"
