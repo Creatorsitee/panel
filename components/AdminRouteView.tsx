@@ -31,9 +31,7 @@ export default function AdminRouteView({ section = 'users' }: AdminRouteViewProp
         void loadWorkspaceData();
         router.push(`/server/${encodeURIComponent(serverId)}`);
       }}
-      onWorkspaceRefresh={() => {
-        void loadWorkspaceData();
-      }}
+      onWorkspaceRefresh={loadWorkspaceData}
     />
   );
 }

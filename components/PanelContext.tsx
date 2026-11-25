@@ -49,6 +49,8 @@ interface PanelContextValue {
   hostInfo: HostInfo | null;
   loadingData: boolean;
   lastHostSnapshotAt: number;
+  filesVersionByServer: Record<string, number>;
+  deletedServerIds: string[];
   loadWorkspaceData: () => Promise<void>;
   refreshHostInfo: () => Promise<void>;
   openCreateModal: () => void;
@@ -79,6 +81,8 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [lastHostSnapshotAt, setLastHostSnapshotAt] = useState(0);
+  const [filesVersionByServer, setFilesVersionByServer] = useState<Record<string, number>>({});
+  const [deletedServerIds, setDeletedServerIds] = useState<string[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const lastStreamAtRef = useRef<number>(0);
@@ -249,6 +253,16 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
           handleUnauthorized();
           return;
         }
+        if (eventName === 'files-changed' && payload && typeof payload === 'object') {
+          const serverId = (payload as { serverId?: string }).serverId;
+          if (serverId) {
+            setFilesVersionByServer((prev) => ({
+              ...prev,
+              [serverId]: (prev[serverId] || 0) + 1,
+            }));
+          }
+          return;
+        }
         if (eventName === 'snapshot' && payload && typeof payload === 'object') {
           const data = payload as {
             user?: PublicUser;
@@ -331,10 +345,11 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
 
   const handleServerDeleted = useCallback(
     (serverId: string) => {
+      setDeletedServerIds((prev) => (prev.includes(serverId) ? prev : [...prev, serverId]));
       setServers((prev) => prev.filter((s) => s.id !== serverId));
       void loadWorkspaceData();
       if (activeServerId === serverId) {
-        router.push('/');
+        router.replace('/');
       }
     },
     [activeServerId, loadWorkspaceData, router]
@@ -369,6 +384,8 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
             hostInfo,
             loadingData,
             lastHostSnapshotAt,
+            filesVersionByServer,
+            deletedServerIds,
             loadWorkspaceData,
             refreshHostInfo,
             openCreateModal,
@@ -384,6 +401,8 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       hostInfo,
       loadingData,
       lastHostSnapshotAt,
+      filesVersionByServer,
+      deletedServerIds,
       loadWorkspaceData,
       refreshHostInfo,
       openCreateModal,

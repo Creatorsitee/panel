@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { getServerDirectory } from './db';
+import { isEditableTextFile } from './file-utils';
 import { parseDotEnvContent, resolveSafePath } from './security';
 import type { FileEntry } from './types';
 
@@ -239,12 +240,23 @@ export function readServerFile(serverId: string, relPath: string): { content: st
   if (stat.isDirectory()) {
     throw new Error('Tidak dapat membaca direktori sebagai file teks.');
   }
+  if (!isEditableTextFile(relPath)) {
+    throw new Error('Format file ini bukan teks (arsip/foto/biner) dan tidak dapat diedit.');
+  }
   if (stat.size > 2 * 1024 * 1024) {
     throw new Error('Ukuran file melebihi batas editor (2 MB).');
   }
 
+  const buf = fs.readFileSync(target);
+  const sampleLen = Math.min(buf.length, 8192);
+  for (let i = 0; i < sampleLen; i += 1) {
+    if (buf[i] === 0) {
+      throw new Error('File biner tidak dapat diedit sebagai teks.');
+    }
+  }
+
   return {
-    content: fs.readFileSync(target, 'utf8'),
+    content: buf.toString('utf8'),
     size: stat.size,
   };
 }
@@ -307,6 +319,16 @@ export function deleteServerEntry(serverId: string, relPath: string): void {
 
 export function renameServerEntry(serverId: string, oldRelPath: string, newRelPath: string): void {
   const baseDir = ensureServerDir(serverId);
+  if (
+    !oldRelPath ||
+    oldRelPath === '/' ||
+    oldRelPath === '.' ||
+    !newRelPath ||
+    newRelPath === '/' ||
+    newRelPath === '.'
+  ) {
+    throw new Error('Path asal dan nama baru wajib diisi.');
+  }
   const oldTarget = resolveSafePath(baseDir, oldRelPath);
   const newTarget = resolveSafePath(baseDir, newRelPath);
   assertRealContainment(baseDir, oldTarget);
@@ -314,6 +336,9 @@ export function renameServerEntry(serverId: string, oldRelPath: string, newRelPa
 
   if (!fs.existsSync(oldTarget)) {
     throw new Error('File asal tidak ditemukan.');
+  }
+  if (oldTarget === newTarget) {
+    return;
   }
   if (fs.existsSync(newTarget)) {
     throw new Error('Nama tujuan sudah digunakan.');
@@ -364,6 +389,9 @@ export function extractZipFile(serverId: string, relPath: string): void {
 
 export function moveServerEntry(serverId: string, oldRelPath: string, newRelPath: string): void {
   const baseDir = ensureServerDir(serverId);
+  if (!oldRelPath || oldRelPath === '/' || oldRelPath === '.') {
+    throw new Error('Tidak dapat memindahkan direktori root server.');
+  }
   const oldTarget = resolveSafePath(baseDir, oldRelPath);
   const newTarget = resolveSafePath(baseDir, newRelPath);
   assertRealContainment(baseDir, oldTarget);
@@ -372,9 +400,73 @@ export function moveServerEntry(serverId: string, oldRelPath: string, newRelPath
   if (!fs.existsSync(oldTarget)) {
     throw new Error('Sumber file/folder tidak ditemukan.');
   }
+  if (oldTarget === newTarget) {
+    throw new Error('Path tujuan sama dengan path asal.');
+  }
+  if (newTarget.startsWith(oldTarget + path.sep)) {
+    throw new Error('Tidak dapat memindahkan folder ke dalam dirinya sendiri.');
+  }
+  if (fs.existsSync(newTarget)) {
+    throw new Error('Nama atau path tujuan sudah ada.');
+  }
+
   const parent = path.dirname(newTarget);
   if (!fs.existsSync(parent)) {
     fs.mkdirSync(parent, { recursive: true });
   }
   fs.renameSync(oldTarget, newTarget);
+}
+
+export function archiveServerEntries(
+  serverId: string,
+  relPaths: string[],
+  currentDir = ''
+): string {
+  const baseDir = ensureServerDir(serverId);
+  const cleanPaths = Array.from(
+    new Set(relPaths.map((p) => p.trim()).filter((p) => p && p !== '/' && p !== '.'))
+  );
+  if (cleanPaths.length === 0) {
+    throw new Error('Pilih minimal satu file atau folder untuk diarsipkan.');
+  }
+
+  const targetDir = resolveSafePath(baseDir, currentDir);
+  assertRealContainment(baseDir, targetDir);
+
+  const zip = new AdmZip();
+
+  for (const relPath of cleanPaths) {
+    const absPath = resolveSafePath(baseDir, relPath);
+    assertRealContainment(baseDir, absPath);
+    if (!fs.existsSync(absPath)) {
+      throw new Error(`Item "${relPath}" tidak ditemukan.`);
+    }
+    const stat = fs.statSync(absPath);
+    const entryBaseName = path.basename(absPath);
+    if (stat.isDirectory()) {
+      zip.addLocalFolder(absPath, entryBaseName);
+    } else {
+      zip.addLocalFile(absPath, '');
+    }
+  }
+
+  const baseLabel =
+    cleanPaths.length === 1
+      ? path.basename(cleanPaths[0]).replace(/\.zip$/i, '') || 'archive'
+      : `archive-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+
+  let candidateName = `${baseLabel}.zip`;
+  let counter = 1;
+  while (fs.existsSync(resolveSafePath(targetDir, candidateName))) {
+    candidateName = `${baseLabel}-${counter}.zip`;
+    counter += 1;
+  }
+
+  const outRelPath = currentDir
+    ? `${currentDir.replace(/\/+$/, '')}/${candidateName}`
+    : candidateName;
+  const outAbsPath = resolveSafePath(baseDir, outRelPath);
+  assertRealContainment(baseDir, outAbsPath);
+  zip.writeZip(outAbsPath);
+  return outRelPath;
 }

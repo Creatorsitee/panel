@@ -13,14 +13,21 @@ import {
   verifyServerScriptFile,
 } from './file-manager';
 import {
-  computeCpuPercentDelta,
   computePanelQuotaSummary,
   parseMeminfoSwapMb,
   parseOsPrettyName,
   parseProcStatCpuSnapshot,
-  type ProcCpuSnapshot,
+  sampleHostCpuPercent,
+  type HostCpuSamplerState,
   type ServerQuotaSample,
 } from './host-stats-utils';
+import {
+  createNetworkTrafficState,
+  recordProcessNetworkSample,
+  resetNetworkTrafficState,
+  sampleNetworkRates,
+  type NetworkTrafficState,
+} from './network-stats-utils';
 import { parseSafeStartupCommand } from './security';
 import { emitWorkspaceChanged } from './realtime-bus';
 import type { ConsoleLine, HostInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
@@ -40,11 +47,8 @@ interface ManagedProcess {
   exitCode: number | null;
   manualStop: boolean;
   oomKilled: boolean;
-  awaitingInput: boolean;
-  stdinSockServer: net.Server | null;
-  stdinSockPath: string | null;
-  stdinSyncFile: string | null;
-  stdinSyncWatcher: fs.FSWatcher | null;
+  netSockServer: net.Server | null;
+  netSockPath: string | null;
   logs: ConsoleLine[];
   partialBuffers: {
     stdout: PartialStreamBuffer;
@@ -54,6 +58,7 @@ interface ManagedProcess {
   lastSampleTimeMs?: number;
   cpuPercent: number;
   memoryMb: number;
+  networkState: NetworkTrafficState;
 }
 
 const MAX_LOG_LINES = 400;
@@ -67,7 +72,7 @@ const globalForPm = globalThis as unknown as {
     pythonVersion: string | null;
     pipVersion: string | null;
   };
-  __nodalHostCpuSample?: ProcCpuSnapshot | null;
+  __nodalHostCpuSampler?: HostCpuSamplerState;
 };
 
 function getProcessMap(): Map<string, ManagedProcess> {
@@ -100,11 +105,8 @@ function getOrCreateState(serverId: string): ManagedProcess {
       exitCode: null,
       manualStop: false,
       oomKilled: false,
-      awaitingInput: false,
-      stdinSockServer: null,
-      stdinSockPath: null,
-      stdinSyncFile: null,
-      stdinSyncWatcher: null,
+      netSockServer: null,
+      netSockPath: null,
       logs: [],
       partialBuffers: {
         stdout: { text: '', timer: null },
@@ -112,6 +114,7 @@ function getOrCreateState(serverId: string): ManagedProcess {
       },
       cpuPercent: 0,
       memoryMb: 0,
+      networkState: createNetworkTrafficState(),
     };
     map.set(serverId, state);
   }
@@ -119,326 +122,278 @@ function getOrCreateState(serverId: string): ManagedProcess {
 }
 
 const RUNTIME_HOOKS_DIR = path.join(os.tmpdir(), 'cmnty-runtime-hooks');
-const NODE_STDIN_HOOK_PATH = path.join(RUNTIME_HOOKS_DIR, 'node-stdin-hook.cjs');
+const NODE_NET_HOOK_PATH = path.join(RUNTIME_HOOKS_DIR, 'node-net-hook.cjs');
 const PYTHON_HOOK_DIR = path.join(RUNTIME_HOOKS_DIR, 'python');
 const PYTHON_SITECUSTOMIZE_PATH = path.join(PYTHON_HOOK_DIR, 'sitecustomize.py');
 
-const NODE_STDIN_HOOK_SOURCE = `'use strict';
+const NODE_NET_HOOK_SOURCE = `'use strict';
 const net = require('net');
-const fs = require('fs');
 
-const sockPath = process.env.CMNTY_STDIN_SOCK;
-const syncFile = process.env.CMNTY_STDIN_SYNC_FILE;
+const sockPath = process.env.CMNTY_NET_SOCK;
 const scriptPath = process.argv[1] || '';
 const isPackageRunner = /(?:^|[\\/\\\\])(?:npm|npx)-cli\\.js$|(?:^|[\\/\\\\])(?:yarn|pnpm)\\.(?:c?js|mjs)$/i.test(scriptPath);
 
 if (sockPath && !isPackageRunner) {
-  let lastAsync = null;
-  let syncDepth = 0;
+  try {
+    const dgram = require('dgram');
+    const trackedSockets = new Set();
+    let closedRxBytes = 0;
+    let closedTxBytes = 0;
+    let udpRxBytes = 0;
+    let udpTxBytes = 0;
+    let lastSentRx = -1;
+    let lastSentTx = -1;
+    let netTimer = null;
 
-  function sendState(awaiting) {
-    try {
-      const conn = net.createConnection(sockPath, () => {
-        conn.end(JSON.stringify({ pid: process.pid, awaiting: Boolean(awaiting) }) + '\\n');
-      });
-      conn.on('error', () => {});
-      conn.unref();
-    } catch {}
-  }
-
-  function updateAsyncState(active) {
-    const next = Boolean(active) || syncDepth > 0;
-    if (lastAsync === next) return;
-    lastAsync = next;
-    sendState(next);
-  }
-
-  function hasStdinListeners() {
-    try {
-      return (
-        process.stdin.listenerCount('data') > 0 ||
-        process.stdin.listenerCount('readable') > 0 ||
-        Boolean(process.stdin.readableFlowing)
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  const stdin = process.stdin;
-  const origOn = stdin.on.bind(stdin);
-  const origAdd = stdin.addListener.bind(stdin);
-  const origOnce = stdin.once.bind(stdin);
-  const origPrepend = stdin.prependListener.bind(stdin);
-  const origPrependOnce = stdin.prependOnceListener.bind(stdin);
-  const origOff = stdin.off.bind(stdin);
-  const origRemove = stdin.removeListener.bind(stdin);
-  const origRemoveAll = stdin.removeAllListeners.bind(stdin);
-  const origResume = stdin.resume.bind(stdin);
-  const origPause = stdin.pause.bind(stdin);
-  const origPipe = stdin.pipe.bind(stdin);
-  const origUnpipe = stdin.unpipe.bind(stdin);
-  const origAsyncIter = stdin[Symbol.asyncIterator].bind(stdin);
-
-  stdin.on = function (ev, fn) {
-    const res = origOn(ev, fn);
-    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
-    return res;
-  };
-  stdin.addListener = function (ev, fn) {
-    const res = origAdd(ev, fn);
-    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
-    return res;
-  };
-  stdin.once = function (ev, fn) {
-    const res = origOnce(ev, fn);
-    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
-    return res;
-  };
-  stdin.prependListener = function (ev, fn) {
-    const res = origPrepend(ev, fn);
-    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
-    return res;
-  };
-  stdin.prependOnceListener = function (ev, fn) {
-    const res = origPrependOnce(ev, fn);
-    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
-    return res;
-  };
-  stdin.off = function (ev, fn) {
-    const res = origOff(ev, fn);
-    updateAsyncState(hasStdinListeners());
-    return res;
-  };
-  stdin.removeListener = function (ev, fn) {
-    const res = origRemove(ev, fn);
-    updateAsyncState(hasStdinListeners());
-    return res;
-  };
-  stdin.removeAllListeners = function (ev) {
-    const res = origRemoveAll(ev);
-    updateAsyncState(hasStdinListeners());
-    return res;
-  };
-  stdin.resume = function () {
-    const res = origResume();
-    updateAsyncState(true);
-    return res;
-  };
-  stdin.pause = function () {
-    const res = origPause();
-    updateAsyncState(false);
-    return res;
-  };
-  stdin.pipe = function (...args) {
-    updateAsyncState(true);
-    return origPipe(...args);
-  };
-  stdin.unpipe = function (...args) {
-    const res = origUnpipe(...args);
-    updateAsyncState(hasStdinListeners());
-    return res;
-  };
-  stdin[Symbol.asyncIterator] = async function* () {
-    updateAsyncState(true);
-    try {
-      for await (const chunk of origAsyncIter()) {
-        yield chunk;
-      }
-    } finally {
-      updateAsyncState(hasStdinListeners());
-    }
-  };
-
-  if (syncFile) {
-    const writeSyncState = (val) => {
+    function sendNetCounters(rx, tx) {
+      if (rx === lastSentRx && tx === lastSentTx) return;
+      lastSentRx = rx;
+      lastSentTx = tx;
       try {
-        fs.writeFileSync(syncFile, val, 'utf8');
+        const conn = net.createConnection(sockPath, () => {
+          conn.end(JSON.stringify({ pid: process.pid, netRxBytes: rx, netTxBytes: tx }) + '\\n');
+        });
+        conn.on('error', () => {});
+        conn.unref();
       } catch {}
-    };
-    const origReadSync = fs.readSync.bind(fs);
-    fs.readSync = function (fd, ...args) {
-      if (fd === 0) {
-        syncDepth += 1;
-        writeSyncState('1');
+    }
+
+    function flushNetSample() {
+      let rx = closedRxBytes + udpRxBytes;
+      let tx = closedTxBytes + udpTxBytes;
+      for (const sock of trackedSockets) {
         try {
-          return origReadSync(fd, ...args);
-        } finally {
-          syncDepth = Math.max(0, syncDepth - 1);
-          if (syncDepth === 0) writeSyncState('0');
-        }
+          rx += Math.max(0, Number(sock.bytesRead) || 0);
+          tx += Math.max(0, Number(sock.bytesWritten) || 0);
+        } catch {}
       }
-      return origReadSync(fd, ...args);
-    };
-    const origReadFileSync = fs.readFileSync.bind(fs);
-    fs.readFileSync = function (fileOrFd, ...args) {
-      if (fileOrFd === 0) {
-        syncDepth += 1;
-        writeSyncState('1');
+      sendNetCounters(rx, tx);
+    }
+
+    function ensureNetTimer() {
+      if (netTimer) return;
+      netTimer = setInterval(flushNetSample, 800);
+      if (netTimer.unref) netTimer.unref();
+    }
+
+    function trackTcpSocket(sock) {
+      if (!sock || sock._cmntyNetTracked || sock._parent) return;
+      sock._cmntyNetTracked = true;
+      trackedSockets.add(sock);
+      ensureNetTimer();
+      sock.once('close', () => {
         try {
-          return origReadFileSync(fileOrFd, ...args);
-        } finally {
-          syncDepth = Math.max(0, syncDepth - 1);
-          if (syncDepth === 0) writeSyncState('0');
-        }
+          closedRxBytes += Math.max(0, Number(sock.bytesRead) || 0);
+          closedTxBytes += Math.max(0, Number(sock.bytesWritten) || 0);
+        } catch {}
+        trackedSockets.delete(sock);
+        flushNetSample();
+      });
+    }
+
+    const origConnect = net.Socket.prototype.connect;
+    net.Socket.prototype.connect = function (...args) {
+      const first = args[0];
+      const isUnix =
+        typeof first === 'string' ||
+        (first && typeof first === 'object' && typeof first.path === 'string' && !first.port && !first.host);
+      if (!isUnix) {
+        trackTcpSocket(this);
       }
-      return origReadFileSync(fileOrFd, ...args);
+      return origConnect.apply(this, args);
     };
-  }
+
+    const origServerEmit = net.Server.prototype.emit;
+    net.Server.prototype.emit = function (ev, ...args) {
+      if (ev === 'connection' && args[0] && !this._pipeName) {
+        trackTcpSocket(args[0]);
+      }
+      return origServerEmit.apply(this, [ev, ...args]);
+    };
+
+    const origDgramEmit = dgram.Socket.prototype.emit;
+    dgram.Socket.prototype.emit = function (ev, ...args) {
+      if (ev === 'message' && args[0] && typeof args[0].length === 'number') {
+        udpRxBytes += args[0].length;
+        ensureNetTimer();
+      }
+      return origDgramEmit.apply(this, [ev, ...args]);
+    };
+
+    const origDgramSend = dgram.Socket.prototype.send;
+    dgram.Socket.prototype.send = function (msg, ...rest) {
+      try {
+        if (typeof msg === 'string' || Buffer.isBuffer(msg) || ArrayBuffer.isView(msg)) {
+          const offset = typeof rest[0] === 'number' && typeof rest[1] === 'number' ? rest[1] : msg.byteLength ?? msg.length;
+          udpTxBytes += Math.max(0, Number(offset) || 0);
+          ensureNetTimer();
+        }
+      } catch {}
+      return origDgramSend.apply(this, [msg, ...rest]);
+    };
+  } catch {}
 }
 `;
 
-const PYTHON_SITECUSTOMIZE_SOURCE = `import builtins
-import json
+const PYTHON_SITECUSTOMIZE_SOURCE = `import json
 import os
-import socket
-import sys
 
-_sock_path = os.environ.get("CMNTY_STDIN_SOCK")
+_sock_path = os.environ.get("CMNTY_NET_SOCK")
 
 if _sock_path:
-    _depth = 0
+    try:
+        import threading
+        import _socket
+        import socket as _stdlib_socket
 
-    def _report(awaiting):
-        try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(_sock_path)
-            s.sendall((json.dumps({"pid": os.getpid(), "awaiting": bool(awaiting)}) + "\\n").encode("utf-8"))
-            s.close()
-        except Exception:
-            pass
+        _orig_c_socket = _socket.socket
+        _orig_stdlib_socket = _stdlib_socket.socket
+        _net_lock = threading.Lock()
+        _net_rx = 0
+        _net_tx = 0
+        _net_started = False
+        _inet_families = tuple(
+            getattr(_socket, name) for name in ("AF_INET", "AF_INET6") if hasattr(_socket, name)
+        )
 
-    def _enter_stdin():
-        global _depth
-        _depth += 1
-        if _depth == 1:
-            _report(True)
+        def _net_reporter():
+            import time
+            last_rx = -1
+            last_tx = -1
+            while True:
+                time.sleep(0.8)
+                with _net_lock:
+                    rx = _net_rx
+                    tx = _net_tx
+                if rx != last_rx or tx != last_tx:
+                    last_rx = rx
+                    last_tx = tx
+                    try:
+                        c = _orig_c_socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                        c.connect(_sock_path)
+                        c.sendall((json.dumps({"pid": os.getpid(), "netRxBytes": rx, "netTxBytes": tx}) + "\\n").encode("utf-8"))
+                        c.close()
+                    except Exception:
+                        pass
 
-    def _exit_stdin():
-        global _depth
-        _depth = max(0, _depth - 1)
-        if _depth == 0:
-            _report(False)
+        def _ensure_net_thread():
+            global _net_started
+            if _net_started:
+                return
+            _net_started = True
+            t = threading.Thread(target=_net_reporter, daemon=True)
+            t.start()
 
-    _orig_input = builtins.input
+        def _add_rx(n):
+            global _net_rx
+            if n and n > 0:
+                with _net_lock:
+                    _net_rx += int(n)
+                _ensure_net_thread()
 
-    def _cmnty_input(prompt=""):
-        _enter_stdin()
-        try:
-            return _orig_input(prompt)
-        finally:
-            _exit_stdin()
+        def _add_tx(n):
+            global _net_tx
+            if n and n > 0:
+                with _net_lock:
+                    _net_tx += int(n)
+                _ensure_net_thread()
 
-    builtins.input = _cmnty_input
+        class _CmntyTrackedSocket(_orig_stdlib_socket):
+            def _is_inet(self):
+                try:
+                    return self.family in _inet_families
+                except Exception:
+                    return False
 
-    class _CmntyStdinWrapper:
-        def __init__(self, inner):
-            self._inner = inner
+            def recv(self, bufsize, flags=0):
+                data = super().recv(bufsize, flags)
+                if self._is_inet():
+                    _add_rx(len(data))
+                return data
 
-        def readline(self, *args, **kwargs):
-            _enter_stdin()
-            try:
-                return self._inner.readline(*args, **kwargs)
-            finally:
-                _exit_stdin()
+            def recv_into(self, buffer, nbytes=0, flags=0):
+                n = super().recv_into(buffer, nbytes, flags)
+                if self._is_inet():
+                    _add_rx(n)
+                return n
 
-        def read(self, *args, **kwargs):
-            _enter_stdin()
-            try:
-                return self._inner.read(*args, **kwargs)
-            finally:
-                _exit_stdin()
+            def recvfrom(self, bufsize, flags=0):
+                data, addr = super().recvfrom(bufsize, flags)
+                if self._is_inet():
+                    _add_rx(len(data))
+                return data, addr
 
-        def readlines(self, *args, **kwargs):
-            _enter_stdin()
-            try:
-                return self._inner.readlines(*args, **kwargs)
-            finally:
-                _exit_stdin()
+            def recvfrom_into(self, buffer, nbytes=0, flags=0):
+                n, addr = super().recvfrom_into(buffer, nbytes, flags)
+                if self._is_inet():
+                    _add_rx(n)
+                return n, addr
 
-        def __iter__(self):
-            return self
+            def send(self, data, flags=0):
+                n = super().send(data, flags)
+                if self._is_inet():
+                    _add_tx(n)
+                return n
 
-        def __next__(self):
-            _enter_stdin()
-            try:
-                return next(self._inner)
-            finally:
-                _exit_stdin()
+            def sendall(self, data, flags=0):
+                res = super().sendall(data, flags)
+                if self._is_inet():
+                    try:
+                        _add_tx(len(data))
+                    except Exception:
+                        pass
+                return res
 
-        def __getattr__(self, name):
-            return getattr(self._inner, name)
+            def sendto(self, data, *args):
+                n = super().sendto(data, *args)
+                if self._is_inet():
+                    _add_tx(n)
+                return n
 
-    if sys.stdin is not None:
-        sys.stdin = _CmntyStdinWrapper(sys.stdin)
+        _stdlib_socket.socket = _CmntyTrackedSocket
+    except Exception:
+        pass
 `;
 
 function ensureRuntimeHooks(): void {
   if (!fs.existsSync(PYTHON_HOOK_DIR)) {
     fs.mkdirSync(PYTHON_HOOK_DIR, { recursive: true });
   }
-  if (!fs.existsSync(NODE_STDIN_HOOK_PATH) || fs.readFileSync(NODE_STDIN_HOOK_PATH, 'utf8') !== NODE_STDIN_HOOK_SOURCE) {
-    fs.writeFileSync(NODE_STDIN_HOOK_PATH, NODE_STDIN_HOOK_SOURCE, 'utf8');
+  if (!fs.existsSync(NODE_NET_HOOK_PATH) || fs.readFileSync(NODE_NET_HOOK_PATH, 'utf8') !== NODE_NET_HOOK_SOURCE) {
+    fs.writeFileSync(NODE_NET_HOOK_PATH, NODE_NET_HOOK_SOURCE, 'utf8');
   }
   if (!fs.existsSync(PYTHON_SITECUSTOMIZE_PATH) || fs.readFileSync(PYTHON_SITECUSTOMIZE_PATH, 'utf8') !== PYTHON_SITECUSTOMIZE_SOURCE) {
     fs.writeFileSync(PYTHON_SITECUSTOMIZE_PATH, PYTHON_SITECUSTOMIZE_SOURCE, 'utf8');
   }
 }
 
-function cleanupStdinMonitor(state: ManagedProcess): void {
-  state.awaitingInput = false;
-  if (state.stdinSyncWatcher) {
+function cleanupNetMonitor(state: ManagedProcess): void {
+  if (state.netSockServer) {
     try {
-      state.stdinSyncWatcher.close();
+      state.netSockServer.close();
     } catch {
       // ignore
     }
-    state.stdinSyncWatcher = null;
+    state.netSockServer = null;
   }
-  if (state.stdinSockServer) {
+  if (state.netSockPath) {
     try {
-      state.stdinSockServer.close();
+      fs.rmSync(state.netSockPath, { force: true });
     } catch {
       // ignore
     }
-    state.stdinSockServer = null;
-  }
-  if (state.stdinSockPath) {
-    try {
-      fs.rmSync(state.stdinSockPath, { force: true });
-    } catch {
-      // ignore
-    }
-    state.stdinSockPath = null;
-  }
-  if (state.stdinSyncFile) {
-    try {
-      fs.rmSync(state.stdinSyncFile, { force: true });
-    } catch {
-      // ignore
-    }
-    state.stdinSyncFile = null;
+    state.netSockPath = null;
   }
 }
 
-function setupStdinMonitor(serverId: string, state: ManagedProcess): {
+async function setupNetMonitor(serverId: string, state: ManagedProcess): Promise<{
   sockPath: string;
-  syncFile: string;
-} {
-  cleanupStdinMonitor(state);
+}> {
+  cleanupNetMonitor(state);
   ensureRuntimeHooks();
 
   const token = crypto.randomBytes(5).toString('hex');
-  const sockPath = path.join(os.tmpdir(), `cmnty-stdin-${serverId}-${token}.sock`);
-  const syncFile = path.join(os.tmpdir(), `cmnty-stdin-${serverId}-${token}.sync`);
-  fs.writeFileSync(syncFile, '0', 'utf8');
-
-  const applyAwaitingState = (nextAwaiting: boolean) => {
-    if (state.status !== 'running' && nextAwaiting) return;
-    if (state.awaitingInput === nextAwaiting) return;
-    state.awaitingInput = nextAwaiting;
-    emitStatus(serverId);
-  };
+  const sockPath = path.join(os.tmpdir(), `cmnty-net-${serverId}-${token}.sock`);
 
   const server = net.createServer((conn) => {
     let buf = '';
@@ -450,8 +405,24 @@ function setupStdinMonitor(serverId: string, state: ManagedProcess): {
         buf = buf.slice(nl + 1);
         if (rawLine) {
           try {
-            const msg = JSON.parse(rawLine) as { awaiting?: boolean };
-            applyAwaitingState(Boolean(msg.awaiting));
+            const msg = JSON.parse(rawLine) as {
+              pid?: number;
+              netRxBytes?: number;
+              netTxBytes?: number;
+            };
+            if (
+              typeof msg.netRxBytes === 'number' ||
+              typeof msg.netTxBytes === 'number'
+            ) {
+              const samplePid = Number(msg.pid || state.pid || 1);
+              recordProcessNetworkSample(
+                state.networkState,
+                samplePid,
+                Number(msg.netRxBytes || 0),
+                Number(msg.netTxBytes || 0),
+                Date.now()
+              );
+            }
           } catch {
             // ignore malformed frame
           }
@@ -464,31 +435,25 @@ function setupStdinMonitor(serverId: string, state: ManagedProcess): {
     });
   });
 
-  server.on('error', () => {
-    // ignore transient socket errors
-  });
-  server.listen(sockPath);
-
-  let watcher: fs.FSWatcher | null = null;
-  try {
-    watcher = fs.watch(syncFile, () => {
-      try {
-        const val = fs.readFileSync(syncFile, 'utf8').trim();
-        applyAwaitingState(val === '1');
-      } catch {
-        // ignore
-      }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    server.once('listening', finish);
+    server.on('error', () => {
+      // ignore transient socket errors and avoid hanging startup
+      finish();
     });
-  } catch {
-    watcher = null;
-  }
+    server.listen(sockPath);
+  });
 
-  state.stdinSockServer = server;
-  state.stdinSockPath = sockPath;
-  state.stdinSyncFile = syncFile;
-  state.stdinSyncWatcher = watcher;
+  state.netSockServer = server;
+  state.netSockPath = sockPath;
 
-  return { sockPath, syncFile };
+  return { sockPath };
 }
 
 function pushConsoleLine(
@@ -591,10 +556,12 @@ function collectProcessGroupPids(rootPid: number): number[] {
   const pids = new Set<number>([rootPid]);
   try {
     const procEntries = fs.readdirSync('/proc');
+    const childrenByParent = new Map<number, number[]>();
+    const pgrpMembers = new Map<number, number[]>();
+
     for (const entry of procEntries) {
       if (!/^\d+$/.test(entry)) continue;
       const pid = Number(entry);
-      if (pid === rootPid) continue;
       try {
         const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
         const closeParen = stat.lastIndexOf(')');
@@ -602,11 +569,41 @@ function collectProcessGroupPids(rootPid: number): number[] {
         const fields = stat.slice(closeParen + 2).split(' ');
         const ppid = Number(fields[1] || 0);
         const pgrp = Number(fields[2] || 0);
-        if (pgrp === rootPid || ppid === rootPid) {
-          pids.add(pid);
+        if (ppid > 0) {
+          const list = childrenByParent.get(ppid);
+          if (list) list.push(pid);
+          else childrenByParent.set(ppid, [pid]);
+        }
+        if (pgrp > 0) {
+          const grp = pgrpMembers.get(pgrp);
+          if (grp) grp.push(pid);
+          else pgrpMembers.set(pgrp, [pid]);
         }
       } catch {
         // process may have exited while scanning
+      }
+    }
+
+    const queue: number[] = [rootPid];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const directChildren = childrenByParent.get(current);
+      if (directChildren) {
+        for (const childPid of directChildren) {
+          if (!pids.has(childPid)) {
+            pids.add(childPid);
+            queue.push(childPid);
+          }
+        }
+      }
+      const sameGroup = pgrpMembers.get(current);
+      if (sameGroup) {
+        for (const grpPid of sameGroup) {
+          if (!pids.has(grpPid)) {
+            pids.add(grpPid);
+            queue.push(grpPid);
+          }
+        }
       }
     }
   } catch {
@@ -629,7 +626,7 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
     process.kill(state.pid, 0);
   } catch {
     if (state.status === 'running') {
-      cleanupStdinMonitor(state);
+      cleanupNetMonitor(state);
       state.status = 'stopped';
       state.pid = null;
       state.child = null;
@@ -739,19 +736,20 @@ export function getServerMetrics(serverId: string): ServerRuntimeMetrics {
     isActive && state.startedAtMs
       ? Math.max(0, Math.floor((Date.now() - state.startedAtMs) / 1000))
       : 0;
+  const netRates = isActive
+    ? sampleNetworkRates(state.networkState, Date.now())
+    : { rxBytesPerSec: 0, txBytesPerSec: 0 };
 
   return {
     status: state.status,
     pid: state.pid,
     cpuPercent,
     memoryMb,
+    networkRxBytesPerSec: netRates.rxBytesPerSec,
+    networkTxBytesPerSec: netRates.txBytesPerSec,
     uptimeSeconds,
     exitCode: state.exitCode,
     startedAt: state.startedAtMs ? new Date(state.startedAtMs).toISOString() : null,
-    awaitingInput:
-      state.status === 'running' || state.status === 'starting'
-        ? state.awaitingInput
-        : false,
   };
 }
 
@@ -794,7 +792,7 @@ export function subscribeConsole(
 
 function buildSafeEnv(
   serverId: string,
-  stdinMonitor?: { sockPath: string; syncFile: string }
+  netMonitor?: { sockPath: string }
 ): NodeJS.ProcessEnv {
   const server = getServerById(serverId);
   if (!server) {
@@ -812,7 +810,7 @@ function buildSafeEnv(
   const pyPackagesDir = path.join(cwd, '.py_packages');
   const pythonPaths: string[] = [];
   if (server.runtime === 'python') {
-    if (stdinMonitor) {
+    if (netMonitor) {
       pythonPaths.push(PYTHON_HOOK_DIR);
     }
     if (fs.existsSync(pyPackagesDir)) {
@@ -824,10 +822,10 @@ function buildSafeEnv(
   }
   const pythonPath = pythonPaths.length > 0 ? pythonPaths.join(path.delimiter) : undefined;
 
-  if (server.runtime === 'nodejs' && stdinMonitor) {
-    const requireFlag = NODE_STDIN_HOOK_PATH.includes(' ')
-      ? `--require "${NODE_STDIN_HOOK_PATH}"`
-      : `--require ${NODE_STDIN_HOOK_PATH}`;
+  if (server.runtime === 'nodejs' && netMonitor) {
+    const requireFlag = NODE_NET_HOOK_PATH.includes(' ')
+      ? `--require "${NODE_NET_HOOK_PATH}"`
+      : `--require ${NODE_NET_HOOK_PATH}`;
     nodeOptions = nodeOptions ? `${nodeOptions} ${requireFlag}`.trim() : requireFlag;
   }
 
@@ -855,10 +853,9 @@ function buildSafeEnv(
     ...diskEnv,
     ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}),
     ...(pythonPath ? { PYTHONPATH: pythonPath } : {}),
-    ...(stdinMonitor
+    ...(netMonitor
       ? {
-          CMNTY_STDIN_SOCK: stdinMonitor.sockPath,
-          CMNTY_STDIN_SYNC_FILE: stdinMonitor.syncFile,
+          CMNTY_NET_SOCK: netMonitor.sockPath,
         }
       : {}),
   } as unknown as NodeJS.ProcessEnv;
@@ -946,6 +943,36 @@ function hasCommandOnSystem(cmd: string, args: string[]): boolean {
   }
 }
 
+function needsDependencyInstall(server: ServerConfig, cwd: string): boolean {
+  if (server.runtime === 'nodejs') {
+    const pkgPath = path.join(cwd, 'package.json');
+    if (!fs.existsSync(pkgPath)) return false;
+    try {
+      const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      return (
+        Object.keys(pkgJson.dependencies || {}).length +
+          Object.keys(pkgJson.devDependencies || {}).length >
+        0
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  const reqPath = path.join(cwd, 'requirements.txt');
+  if (!fs.existsSync(reqPath)) return false;
+  const reqLines = fs
+    .readFileSync(reqPath, 'utf8')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+  return reqLines.length > 0;
+}
+
 async function ensureServerDependencies(server: ServerConfig, cwd: string): Promise<void> {
   const state = getOrCreateState(server.id);
 
@@ -960,6 +987,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     } catch {
       state.status = 'error';
+      state.startedAtMs = null;
       emitStatus(server.id);
       const msg = 'Invalid package.json file (malformed JSON syntax).';
       appendLog(server.id, 'system', msg);
@@ -981,7 +1009,20 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       await runProcessCommand(server.id, cwd, 'npm', ['install', '--no-audit', '--no-fund']);
       appendLog(server.id, 'system', 'Dependencies from package.json installed successfully.');
     } catch (err) {
+      if (state.manualStop) {
+        state.status = 'stopped';
+        state.pid = null;
+        state.startedAtMs = null;
+        state.cpuPercent = 0;
+        state.memoryMb = 0;
+        emitStatus(server.id);
+        throw err;
+      }
       state.status = 'error';
+      state.pid = null;
+      state.startedAtMs = null;
+      state.cpuPercent = 0;
+      state.memoryMb = 0;
       emitStatus(server.id);
       const msg = err instanceof Error ? err.message : 'Failed to install dependencies from package.json.';
       appendLog(server.id, 'system', msg);
@@ -1014,15 +1055,18 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
   const venvPip = path.join(cwd, '.venv', 'bin', 'pip');
   try {
     if (!fs.existsSync(venvPip)) {
-      const venvCheck = spawnSync('python3', ['-m', 'venv', '.venv'], {
-        cwd,
-        env: buildSafeEnv(server.id),
-        encoding: 'utf8',
-        shell: false,
-      });
-      if (venvCheck.status !== 0 && fs.existsSync(path.join(cwd, '.venv'))) {
-        fs.rmSync(path.join(cwd, '.venv'), { recursive: true, force: true });
+      try {
+        await runProcessCommand(server.id, cwd, 'python3', ['-m', 'venv', '.venv']);
+      } catch (venvErr) {
+        if (state.manualStop) throw venvErr;
+        if (fs.existsSync(path.join(cwd, '.venv'))) {
+          fs.rmSync(path.join(cwd, '.venv'), { recursive: true, force: true });
+        }
       }
+    }
+
+    if (state.manualStop) {
+      throw new Error('Installation aborted by user.');
     }
 
     if (fs.existsSync(venvPip)) {
@@ -1068,7 +1112,20 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       'Found requirements.txt, but neither pip3 nor python3-venv is available on the host system.'
     );
   } catch (err) {
+    if (state.manualStop) {
+      state.status = 'stopped';
+      state.pid = null;
+      state.startedAtMs = null;
+      state.cpuPercent = 0;
+      state.memoryMb = 0;
+      emitStatus(server.id);
+      throw err;
+    }
     state.status = 'error';
+    state.pid = null;
+    state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
     emitStatus(server.id);
     const msg = err instanceof Error ? err.message : 'Failed to install dependencies from requirements.txt.';
     appendLog(server.id, 'system', msg);
@@ -1103,79 +1160,32 @@ function resolveNodeExecutable(cwd: string, requestedExecutable: string): string
   return requestedExecutable;
 }
 
-export async function startServerProcess(serverId: string): Promise<ServerRuntimeMetrics> {
-  const server = getServerById(serverId);
-  if (!server) {
-    throw new Error('Server tidak ditemukan.');
-  }
-
+async function launchServerProcess(
+  server: ServerConfig,
+  cwd: string,
+  parsed: ReturnType<typeof parseSafeStartupCommand>,
+  skipInstallCheck: boolean
+): Promise<void> {
+  const serverId = server.id;
   const state = getOrCreateState(serverId);
-  if (
-    state.status === 'running' ||
-    state.status === 'starting' ||
-    state.status === 'installing' ||
-    state.status === 'stopping'
-  ) {
-    throw new Error(`Server sedang dalam status "${state.status}".`);
-  }
 
-  state.status = 'starting';
-  state.startedAtMs = Date.now();
-  state.manualStop = false;
-  state.oomKilled = false;
-  state.exitCode = null;
-  state.lastCpuJiffies = undefined;
-  state.lastSampleTimeMs = undefined;
-  emitStatus(serverId);
-
-  appendLog(serverId, 'system', 'Checking server disk space usage, this could take a few seconds...');
-  appendLog(serverId, 'system', 'Updating process configuration files...');
-  appendLog(serverId, 'system', 'Ensuring file permissions are set correctly, this could take a few seconds...');
-  appendLog(serverId, 'system', 'Server marked as starting...');
-
-  let cwd: string;
-  let parsed: ReturnType<typeof parseSafeStartupCommand>;
-  try {
-    cwd = ensureServerDir(serverId);
-    parsed = parseSafeStartupCommand(server.startupCommand, server.runtime);
-
-    if (parsed.npmScriptName) {
-      const pkgPath = path.join(cwd, 'package.json');
-      if (!fs.existsSync(pkgPath)) {
-        throw new Error(
-          `package.json was not found in this server directory for "${server.startupCommand}".`
-        );
-      }
-      let pkgJson: { scripts?: Record<string, string> };
-      try {
-        pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      } catch {
-        throw new Error('Invalid package.json file.');
-      }
-      const scriptCmd = pkgJson.scripts?.[parsed.npmScriptName];
-      if (!scriptCmd) {
-        throw new Error(`Script "${parsed.npmScriptName}" was not found in package.json.`);
-      }
-      const innerParsed = parseSafeStartupCommand(scriptCmd, 'nodejs');
-      if (innerParsed.scriptArg) {
-        verifyServerScriptFile(serverId, innerParsed.scriptArg);
-      }
-    } else if (parsed.pythonModule) {
-      verifyServerPythonModule(serverId, parsed.pythonModule, parsed.args);
-    } else if (parsed.scriptArg) {
-      verifyServerScriptFile(serverId, parsed.scriptArg);
+  if (!skipInstallCheck) {
+    try {
+      await ensureServerDependencies(server, cwd);
+    } catch {
+      return;
     }
-  } catch (err) {
-    state.status = 'error';
-    const msg = err instanceof Error ? err.message : 'Invalid startup script configuration.';
-    appendLog(serverId, 'system', `Failed to start server: ${msg}`);
-    appendLog(serverId, 'system', 'Server marked as offline...');
-    emitStatus(serverId);
-    throw err;
   }
 
-  // Automatically install package.json or requirements.txt before launching
-  await ensureServerDependencies(server, cwd);
+  if (state.manualStop) {
+    state.status = 'stopped';
+    state.pid = null;
+    state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
+    emitStatus(serverId);
+    return;
+  }
 
   const launchExecutable =
     server.runtime === 'python'
@@ -1183,16 +1193,24 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
       : resolveNodeExecutable(cwd, parsed.executable);
 
   state.status = 'starting';
-  state.awaitingInput = false;
   emitStatus(serverId);
+
+  const netMonitor = await setupNetMonitor(serverId, state);
+
+  if (state.manualStop) {
+    cleanupNetMonitor(state);
+    state.status = 'stopped';
+    state.pid = null;
+    state.startedAtMs = null;
+    emitStatus(serverId);
+    return;
+  }
 
   appendLog(serverId, 'system', `container@cmnty~ ${server.startupCommand}`);
 
-  const stdinMonitor = setupStdinMonitor(serverId, state);
-
   const child = spawn(launchExecutable, parsed.args, {
     cwd,
-    env: buildSafeEnv(serverId, stdinMonitor),
+    env: buildSafeEnv(serverId, netMonitor),
     shell: false,
     detached: process.platform !== 'win32',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -1220,12 +1238,15 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   child.on('error', (err) => {
     flushStreamBuffer(serverId, 'stdout');
     flushStreamBuffer(serverId, 'stderr');
-    cleanupStdinMonitor(state);
+    cleanupNetMonitor(state);
     appendLog(serverId, 'system', `Failed to start container process: ${err.message}`);
     state.status = 'error';
     state.child = null;
     state.pid = null;
     state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
+    resetNetworkTrafficState(state.networkState);
     appendLog(serverId, 'system', 'Server marked as offline...');
     emitStatus(serverId);
   });
@@ -1233,12 +1254,13 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   child.on('close', (code) => {
     flushStreamBuffer(serverId, 'stdout');
     flushStreamBuffer(serverId, 'stderr');
-    cleanupStdinMonitor(state);
+    cleanupNetMonitor(state);
     state.child = null;
     state.pid = null;
     state.exitCode = code;
     state.cpuPercent = 0;
     state.memoryMb = 0;
+    resetNetworkTrafficState(state.networkState);
     const wasManual = state.manualStop;
     const wasOom = state.oomKilled;
     state.oomKilled = false;
@@ -1266,7 +1288,95 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
       }, 2000);
     }
   });
+}
 
+export async function startServerProcess(serverId: string): Promise<ServerRuntimeMetrics> {
+  const server = getServerById(serverId);
+  if (!server) {
+    throw new Error('Server tidak ditemukan.');
+  }
+
+  const state = getOrCreateState(serverId);
+  if (
+    state.status === 'running' ||
+    state.status === 'starting' ||
+    state.status === 'installing' ||
+    state.status === 'stopping'
+  ) {
+    throw new Error(`Server sedang dalam status "${state.status}".`);
+  }
+
+  state.status = 'starting';
+  state.startedAtMs = Date.now();
+  state.manualStop = false;
+  state.oomKilled = false;
+  state.exitCode = null;
+  state.lastCpuJiffies = undefined;
+  state.lastSampleTimeMs = undefined;
+  resetNetworkTrafficState(state.networkState);
+  emitStatus(serverId);
+
+  appendLog(serverId, 'system', 'Server marked as starting...');
+  appendLog(serverId, 'system', 'Checking server disk space usage, this could take a few seconds...');
+  appendLog(serverId, 'system', 'Updating process configuration files...');
+  appendLog(serverId, 'system', 'Ensuring file permissions are set correctly, this could take a few seconds...');
+
+  let cwd: string;
+  let parsed: ReturnType<typeof parseSafeStartupCommand>;
+  try {
+    cwd = ensureServerDir(serverId);
+    parsed = parseSafeStartupCommand(server.startupCommand, server.runtime);
+
+    if (parsed.npmScriptName) {
+      const pkgPath = path.join(cwd, 'package.json');
+      if (!fs.existsSync(pkgPath)) {
+        throw new Error(
+          `Entrypoint file "package.json" was not found in this server directory.`
+        );
+      }
+      let pkgJson: { scripts?: Record<string, string> };
+      try {
+        pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      } catch {
+        throw new Error('Invalid package.json file.');
+      }
+      const scriptCmd = pkgJson.scripts?.[parsed.npmScriptName];
+      if (!scriptCmd) {
+        throw new Error(`Script "${parsed.npmScriptName}" was not found in package.json.`);
+      }
+      const innerParsed = parseSafeStartupCommand(scriptCmd, 'nodejs');
+      if (innerParsed.scriptArg) {
+        verifyServerScriptFile(serverId, innerParsed.scriptArg);
+      }
+    } else if (parsed.pythonModule) {
+      verifyServerPythonModule(serverId, parsed.pythonModule, parsed.args);
+    } else if (parsed.scriptArg) {
+      verifyServerScriptFile(serverId, parsed.scriptArg);
+    }
+  } catch (err) {
+    state.status = 'error';
+    state.pid = null;
+    state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
+    const msg = err instanceof Error ? err.message : 'Invalid startup script configuration.';
+    appendLog(serverId, 'system', `Failed to start server: ${msg}`);
+    appendLog(serverId, 'system', 'Server marked as offline...');
+    emitStatus(serverId);
+    throw err;
+  }
+
+  const requiresInstall = needsDependencyInstall(server, cwd);
+  state.status = requiresInstall ? 'installing' : 'starting';
+  emitStatus(serverId);
+
+  if (requiresInstall) {
+    // Run dependency installation and process launch asynchronously so power API does not time out
+    void launchServerProcess(server, cwd, parsed, false);
+    return getServerMetrics(serverId);
+  }
+
+  await launchServerProcess(server, cwd, parsed, true);
   return getServerMetrics(serverId);
 }
 
@@ -1276,26 +1386,69 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
     state.manualStop = true;
     state.status = 'stopping';
     emitStatus(serverId);
-    appendLog(serverId, 'system', 'Server marked as stopping...');
-    killProcessTree(state.installChild, forceKill ? 'SIGKILL' : 'SIGTERM');
+    const installChild = state.installChild;
+
+    if (forceKill) {
+      appendLog(serverId, 'system', 'Server marked as killing (SIGKILL)...');
+      killProcessTree(installChild, 'SIGKILL');
+    } else {
+      appendLog(serverId, 'system', 'Server marked as stopping...');
+      killProcessTree(installChild, 'SIGTERM');
+    }
+
+    await new Promise<void>((resolve) => {
+      if (!state.installChild) {
+        resolve();
+        return;
+      }
+      let settled = false;
+      let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (killGraceTimer) clearTimeout(killGraceTimer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        if (state.installChild) {
+          appendLog(serverId, 'system', 'Installer did not respond to stop signal; sending SIGKILL...');
+          killProcessTree(state.installChild, 'SIGKILL');
+          killGraceTimer = setTimeout(done, 1200);
+        } else {
+          done();
+        }
+      }, forceKill ? 1200 : 3500);
+
+      installChild.once('close', done);
+    });
+
     state.installChild = null;
+    state.pid = null;
+    state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
     state.status = 'stopped';
+    resetNetworkTrafficState(state.networkState);
     appendLog(serverId, 'system', 'Server marked as offline...');
     emitStatus(serverId);
     return getServerMetrics(serverId);
   }
 
   if (!state.child || !state.pid) {
+    state.manualStop = true;
     state.status = 'stopped';
     state.pid = null;
     state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
+    resetNetworkTrafficState(state.networkState);
     emitStatus(serverId);
     return getServerMetrics(serverId);
   }
 
   state.manualStop = true;
   state.status = 'stopping';
-  state.awaitingInput = false;
   emitStatus(serverId);
   const child = state.child;
 
@@ -1312,21 +1465,40 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
       resolve();
       return;
     }
+    let settled = false;
+    let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (killGraceTimer) clearTimeout(killGraceTimer);
+      resolve();
+    };
     const timer = setTimeout(() => {
       if (state.child) {
         appendLog(serverId, 'system', 'Server did not respond to stop signal; sending SIGKILL...');
         killProcessTree(state.child, 'SIGKILL');
+        killGraceTimer = setTimeout(done, 1200);
+      } else {
+        done();
       }
-      resolve();
-    }, 3500);
+    }, forceKill ? 1200 : 3500);
 
-    child.once('close', () => {
-      clearTimeout(timer);
-      resolve();
-    });
+    child.once('close', done);
   });
 
-  cleanupStdinMonitor(state);
+  cleanupNetMonitor(state);
+  if (state.child === child || state.status === 'stopping') {
+    state.child = null;
+    state.pid = null;
+    state.startedAtMs = null;
+    state.cpuPercent = 0;
+    state.memoryMb = 0;
+    state.status = 'stopped';
+    resetNetworkTrafficState(state.networkState);
+    appendLog(serverId, 'system', 'Server marked as offline...');
+    emitStatus(serverId);
+  }
   return getServerMetrics(serverId);
 }
 
@@ -1344,10 +1516,7 @@ export function sendStdinToServer(serverId: string, input: string): void {
     state.status === 'running' || state.status === 'starting' ? state.child : null;
 
   if (!targetChild || !targetChild.stdin || targetChild.stdin.destroyed || !targetChild.stdin.writable) {
-    throw new Error('Server tidak sedang berjalan. Start server terlebih dahulu untuk mengirim input.');
-  }
-  if (!state.awaitingInput) {
-    throw new Error('Program tidak sedang meminta input (stdin).');
+    throw new Error('Server is offline. Start the server first before sending commands.');
   }
   appendLog(serverId, 'stdin', `> ${input}`);
   targetChild.stdin.write(`${input}\n`);
@@ -1459,13 +1628,17 @@ function detectDiskStatsGb(): { diskTotalGb: number; diskUsedGb: number; diskFre
 }
 
 function primeHostCpuBaseline(): void {
-  if (globalForPm.__nodalHostCpuSample) return;
+  if (globalForPm.__nodalHostCpuSampler?.lastSnapshot) return;
   try {
     if (fs.existsSync('/proc/stat')) {
       const stat = fs.readFileSync('/proc/stat', 'utf8');
       const snap = parseProcStatCpuSnapshot(stat);
       if (snap) {
-        globalForPm.__nodalHostCpuSample = snap;
+        globalForPm.__nodalHostCpuSampler = {
+          lastSnapshot: snap,
+          lastSampleAtMs: Date.now(),
+          lastPercent: null,
+        };
       }
     }
   } catch {
@@ -1476,23 +1649,25 @@ function primeHostCpuBaseline(): void {
 primeHostCpuBaseline();
 
 function detectHostCpuPercent(load1m: number, cpuCores: number): number {
+  const fallback = Number(Math.min(100, (load1m / Math.max(1, cpuCores)) * 100).toFixed(1));
+  const currentSampler: HostCpuSamplerState = globalForPm.__nodalHostCpuSampler ?? {
+    lastSnapshot: null,
+    lastSampleAtMs: 0,
+    lastPercent: null,
+  };
+
   try {
     if (fs.existsSync('/proc/stat')) {
       const stat = fs.readFileSync('/proc/stat', 'utf8');
       const current = parseProcStatCpuSnapshot(stat);
-      const prev = globalForPm.__nodalHostCpuSample ?? null;
-      if (current) {
-        globalForPm.__nodalHostCpuSample = current;
-        const deltaPct = computeCpuPercentDelta(prev, current);
-        if (deltaPct !== null) {
-          return deltaPct;
-        }
-      }
+      const result = sampleHostCpuPercent(currentSampler, current, Date.now(), fallback, 900);
+      globalForPm.__nodalHostCpuSampler = result.nextState;
+      return result.percent;
     }
   } catch {
     // fallback below
   }
-  return Number(Math.min(100, (load1m / Math.max(1, cpuCores)) * 100).toFixed(1));
+  return currentSampler.lastPercent ?? fallback;
 }
 
 function detectSwapMb(): { swapTotalMb: number; swapUsedMb: number; swapFreeMb: number } {

@@ -7,7 +7,7 @@ import {
   listServersForUser,
 } from '@/lib/db';
 import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
-import { subscribeWorkspaceEvents } from '@/lib/realtime-bus';
+import { subscribeFilesChanged, subscribeWorkspaceEvents } from '@/lib/realtime-bus';
 import { requireAuth } from '@/lib/route-guard';
 import type {
   AdminServerSummary,
@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
   const userId = auth.user.id;
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let unsubscribeFiles: (() => void) | null = null;
   let metricsTimer: ReturnType<typeof setInterval> | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
@@ -42,6 +43,10 @@ export async function GET(req: NextRequest) {
     if (unsubscribe) {
       unsubscribe();
       unsubscribe = null;
+    }
+    if (unsubscribeFiles) {
+      unsubscribeFiles();
+      unsubscribeFiles = null;
     }
     if (metricsTimer) {
       clearInterval(metricsTimer);
@@ -165,6 +170,20 @@ export async function GET(req: NextRequest) {
           pushSnapshot();
         }, 40);
       });
+
+      if (scope === 'workspace') {
+        unsubscribeFiles = subscribeFilesChanged((changedServerId) => {
+          if (closed) return;
+          const freshUser = getUserById(userId);
+          if (!freshUser) return;
+          const allowed =
+            freshUser.role === 'admin' ||
+            listServersForUser(freshUser.id, freshUser.role).some((s) => s.id === changedServerId);
+          if (allowed) {
+            sendEvent('files-changed', { serverId: changedServerId });
+          }
+        });
+      }
 
       metricsTimer = setInterval(() => {
         pushSnapshot();

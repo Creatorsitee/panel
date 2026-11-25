@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Activity,
   Cpu,
@@ -29,16 +29,23 @@ function clampPct(value: number, max: number): number {
 
 export default function HostResourcesView() {
   const { hostInfo, loadingData, lastHostSnapshotAt, refreshHostInfo } = usePanel();
+  const lastSnapshotRef = useRef(lastHostSnapshotAt);
 
   useEffect(() => {
-    void refreshHostInfo();
+    lastSnapshotRef.current = lastHostSnapshotAt;
+  }, [lastHostSnapshotAt]);
+
+  useEffect(() => {
+    if (Date.now() - lastSnapshotRef.current >= 2500) {
+      void refreshHostInfo();
+    }
     const timer = setInterval(() => {
-      if (Date.now() - lastHostSnapshotAt >= 1500) {
+      if (Date.now() - lastSnapshotRef.current >= 3000) {
         void refreshHostInfo();
       }
-    }, 1500);
+    }, 3000);
     return () => clearInterval(timer);
-  }, [refreshHostInfo, lastHostSnapshotAt]);
+  }, [refreshHostInfo]);
 
   if (loadingData && !hostInfo) {
     return (

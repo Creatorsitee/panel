@@ -10,8 +10,7 @@ export interface ConsolePowerPermissions {
 }
 
 export function getConsolePowerPermissions(
-  status: ServerStatus,
-  awaitingInput = false
+  status: ServerStatus
 ): ConsolePowerPermissions {
   const isRunning = status === 'running';
   const isStarting = status === 'starting' || status === 'installing';
@@ -23,7 +22,7 @@ export function getConsolePowerPermissions(
     canRestart: isRunning,
     canStop: isRunning || isStarting,
     canKill: isRunning || isStarting || isStopping,
-    canSendInput: (isRunning || isStarting) && Boolean(awaitingInput),
+    canSendInput: isRunning || status === 'starting',
     isBusy: isStarting || isStopping,
   };
 }

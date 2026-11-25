@@ -83,6 +83,67 @@ export function computeCpuPercentDelta(
   return Number(Math.min(100, (busy / deltaTotal) * 100).toFixed(1));
 }
 
+export interface HostCpuSamplerState {
+  lastSnapshot: ProcCpuSnapshot | null;
+  lastSampleAtMs: number;
+  lastPercent: number | null;
+}
+
+export function sampleHostCpuPercent(
+  state: HostCpuSamplerState,
+  currentSnapshot: ProcCpuSnapshot | null,
+  nowMs: number,
+  fallbackPercent: number,
+  minIntervalMs = 900
+): { percent: number; nextState: HostCpuSamplerState } {
+  if (!currentSnapshot) {
+    return {
+      percent: state.lastPercent ?? fallbackPercent,
+      nextState: state,
+    };
+  }
+
+  if (!state.lastSnapshot) {
+    return {
+      percent: state.lastPercent ?? fallbackPercent,
+      nextState: {
+        lastSnapshot: currentSnapshot,
+        lastSampleAtMs: nowMs,
+        lastPercent: state.lastPercent,
+      },
+    };
+  }
+
+  const elapsed = nowMs - state.lastSampleAtMs;
+  if (elapsed < minIntervalMs && state.lastPercent !== null) {
+    return {
+      percent: state.lastPercent,
+      nextState: state,
+    };
+  }
+
+  const deltaPct = computeCpuPercentDelta(state.lastSnapshot, currentSnapshot);
+  if (deltaPct === null) {
+    return {
+      percent: state.lastPercent ?? fallbackPercent,
+      nextState: {
+        lastSnapshot: currentSnapshot,
+        lastSampleAtMs: nowMs,
+        lastPercent: state.lastPercent,
+      },
+    };
+  }
+
+  return {
+    percent: deltaPct,
+    nextState: {
+      lastSnapshot: currentSnapshot,
+      lastSampleAtMs: nowMs,
+      lastPercent: deltaPct,
+    },
+  };
+}
+
 export interface ServerQuotaSample {
   memoryLimitMb: number;
   cpuLimitPercent: number;

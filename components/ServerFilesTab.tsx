@@ -1,22 +1,26 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   ChevronLeft,
+  FileArchive,
   FileCode2,
   FilePlus2,
   Folder,
   FolderPlus,
-  MoreVertical,
+  MoreHorizontal,
   Move,
+  Pencil,
   Save,
   Trash2,
   Upload,
-  FileArchive,
-  ArrowLeft,
+  X,
 } from 'lucide-react';
 import { apiFetch } from './api-client';
+import { usePanel } from './PanelContext';
 import { FileEditorSkeleton, FileManagerSkeleton } from './Skeletons';
+import { isEditableTextFile } from '@/lib/file-utils';
 import {
   showConfirmDialog,
   showErrorAlert,
@@ -35,35 +39,21 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-const TEXT_FILE_EXTENSIONS = new Set([
-  '.js',
-  '.ts',
-  '.mjs',
-  '.cjs',
-  '.py',
-  '.json',
-  '.env',
-  '.txt',
-  '.md',
-  '.yml',
-  '.yaml',
-  '.html',
-  '.css',
-  '.sh',
-  '.ini',
-  '.cfg',
-]);
-
-function isEditableFile(filename: string): boolean {
-  const lower = filename.toLowerCase();
-  if (lower === '.env' || lower === 'dockerfile' || lower === 'requirements.txt') return true;
-  const idx = lower.lastIndexOf('.');
-  if (idx === -1) return false;
-  const ext = lower.slice(idx);
-  return TEXT_FILE_EXTENSIONS.has(ext);
+function isSystemIgnoredDir(entry: FileEntry): boolean {
+  return (
+    entry.type === 'directory' &&
+    (entry.name === 'node_modules' ||
+      entry.name === '.git' ||
+      entry.name === '__pycache__' ||
+      entry.name === '.venv' ||
+      entry.name === '.py_packages')
+  );
 }
 
 export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
+  const { filesVersionByServer } = usePanel();
+  const filesVersion = filesVersionByServer[serverId] || 0;
+
   const [currentDir, setCurrentDir] = useState('');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -76,33 +66,55 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   const [newEntryType, setNewEntryType] = useState<'file' | 'directory' | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   const [activeMenuPath, setActiveMenuPath] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{
     top?: number;
     bottom?: number;
     right: number;
   } | null>(null);
-  const [moveModalPath, setMoveModalPath] = useState<string | null>(null);
+
+  // Single or bulk Move modal
+  const [moveModalPaths, setMoveModalPaths] = useState<string[] | null>(null);
   const [newDestPath, setNewDestPath] = useState('');
 
+  // Rename modal
+  const [renameModalPath, setRenameModalPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const currentDirRef = useRef(currentDir);
+
+  useEffect(() => {
+    currentDirRef.current = currentDir;
+  }, [currentDir]);
 
   const loadDirectory = useCallback(
-    async (dirPath: string) => {
-      setLoadingList(true);
+    async (dirPath: string, options: { silent?: boolean } = {}) => {
+      if (!options.silent) {
+        setLoadingList(true);
+      }
       try {
         const res = await apiFetch<{ path: string; entries: FileEntry[] }>(
           `/api/servers/${serverId}/files?mode=list&path=${encodeURIComponent(dirPath)}`
         );
         setEntries(res.entries);
         setCurrentDir(dirPath);
+        const existingSet = new Set(res.entries.map((item) => item.path));
+        setSelectedPaths((prev) => prev.filter((p) => existingSet.has(p)));
       } catch (err) {
-        await showErrorAlert(
-          'Gagal Memuat Direktori',
-          err instanceof Error ? err.message : 'Gagal memuat daftar file.'
-        );
+        if (!options.silent) {
+          await showErrorAlert(
+            'Gagal Memuat Direktori',
+            err instanceof Error ? err.message : 'Gagal memuat daftar file.'
+          );
+        }
       } finally {
-        setLoadingList(false);
+        if (!options.silent) {
+          setLoadingList(false);
+        }
       }
     },
     [serverId]
@@ -119,6 +131,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         if (active) {
           setEntries(res.entries);
           setCurrentDir('');
+          setSelectedPaths([]);
         }
       } catch (err) {
         if (active) {
@@ -138,7 +151,12 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   }, [serverId]);
 
   useEffect(() => {
-    if (!activeMenuPath && !newEntryType && !moveModalPath) return;
+    if (filesVersion === 0) return;
+    void loadDirectory(currentDirRef.current, { silent: true });
+  }, [filesVersion, loadDirectory]);
+
+  useEffect(() => {
+    if (!activeMenuPath && !newEntryType && !moveModalPaths && !renameModalPath) return;
     const closeMenu = () => {
       setActiveMenuPath(null);
       setMenuPosition(null);
@@ -147,7 +165,8 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       if (e.key === 'Escape') {
         closeMenu();
         setNewEntryType(null);
-        setMoveModalPath(null);
+        setMoveModalPaths(null);
+        setRenameModalPath(null);
       }
     };
     window.addEventListener('click', closeMenu);
@@ -158,13 +177,36 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       window.removeEventListener('resize', closeMenu);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [activeMenuPath, newEntryType, moveModalPath]);
+  }, [activeMenuPath, newEntryType, moveModalPaths, renameModalPath]);
+
+  const selectableEntries = useMemo(
+    () => entries.filter((entry) => !isSystemIgnoredDir(entry)),
+    [entries]
+  );
+
+  const allSelectableChecked =
+    selectableEntries.length > 0 &&
+    selectableEntries.every((entry) => selectedPaths.includes(entry.path));
+
+  function toggleSelectPath(entryPath: string) {
+    setSelectedPaths((prev) =>
+      prev.includes(entryPath) ? prev.filter((p) => p !== entryPath) : [...prev, entryPath]
+    );
+  }
+
+  function toggleSelectAll() {
+    if (allSelectableChecked) {
+      setSelectedPaths([]);
+    } else {
+      setSelectedPaths(selectableEntries.map((entry) => entry.path));
+    }
+  }
 
   async function openFile(filePath: string) {
-    if (!isEditableFile(filePath)) {
+    if (!isEditableTextFile(filePath)) {
       await showWarningAlert(
         'Format Tidak Didukung',
-        `File "${filePath}" adalah format biner/arsip dan tidak dapat diedit sebagai teks.`
+        `File "${filePath}" adalah format arsip, paket, foto, atau biner dan tidak dapat diedit sebagai teks.`
       );
       return;
     }
@@ -201,10 +243,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       });
       setSavedContent(fileContent);
       void showSuccessToast('File disimpan', selectedFile);
-      setSelectedFile(null);
-      setFileContent('');
-      setSavedContent('');
-      void loadDirectory(currentDir);
+      void loadDirectory(currentDir, { silent: true });
     } catch (err) {
       await showErrorAlert(
         'Gagal Menyimpan File',
@@ -239,7 +278,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         fullPath
       );
       await loadDirectory(currentDir);
-      if (createdType === 'file') {
+      if (createdType === 'file' && isEditableTextFile(fullPath)) {
         void openFile(fullPath);
       }
     } catch (err) {
@@ -271,12 +310,53 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         setFileContent('');
         setSavedContent('');
       }
+      setSelectedPaths((prev) => prev.filter((p) => p !== entryPath));
       void showSuccessToast('Berhasil dihapus', entryPath);
       await loadDirectory(currentDir);
     } catch (err) {
       await showErrorAlert(
         'Gagal Menghapus',
         err instanceof Error ? err.message : 'Gagal menghapus item.'
+      );
+    }
+  }
+
+  async function handleRenameEntry(e: React.FormEvent) {
+    e.preventDefault();
+    if (!renameModalPath || !renameValue.trim()) return;
+    const trimmed = renameValue.trim().replace(/^\/+|\/+$/g, '');
+    if (!trimmed || trimmed.includes('/')) {
+      await showErrorAlert('Nama Tidak Valid', 'Masukkan nama file/folder baru tanpa garis miring (/).');
+      return;
+    }
+
+    const parentParts = renameModalPath.split('/');
+    parentParts.pop();
+    const newPath = parentParts.length > 0 ? `${parentParts.join('/')}/${trimmed}` : trimmed;
+
+    try {
+      await apiFetch(`/api/servers/${serverId}/files`, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'rename',
+          path: renameModalPath,
+          newPath,
+        }),
+      });
+      if (selectedFile === renameModalPath) {
+        setSelectedFile(newPath);
+      }
+      setSelectedPaths((prev) =>
+        prev.map((p) => (p === renameModalPath ? newPath : p))
+      );
+      setRenameModalPath(null);
+      setRenameValue('');
+      void showSuccessToast('Berhasil diganti nama', newPath);
+      await loadDirectory(currentDir);
+    } catch (err) {
+      await showErrorAlert(
+        'Gagal Mengganti Nama',
+        err instanceof Error ? err.message : 'Gagal mengganti nama item.'
       );
     }
   }
@@ -301,28 +381,119 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     }
   }
 
-  async function handleMoveEntry(e: React.FormEvent) {
-    e.preventDefault();
-    if (!moveModalPath || !newDestPath.trim()) return;
-    const destination = newDestPath.trim();
+  async function handleArchivePaths(targetPaths: string[]) {
+    setActiveMenuPath(null);
+    if (targetPaths.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await apiFetch<{ ok: boolean; archivePath: string }>(
+        `/api/servers/${serverId}/files`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'archive',
+            paths: targetPaths,
+            currentDir,
+          }),
+        }
+      );
+      setSelectedPaths([]);
+      void showSuccessToast('Arsip ZIP dibuat', res.archivePath);
+      await loadDirectory(currentDir);
+    } catch (err) {
+      await showErrorAlert(
+        'Gagal Mengarsipkan',
+        err instanceof Error ? err.message : 'Gagal membuat arsip ZIP.'
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedPaths.length === 0) return;
+    const confirmed = await showConfirmDialog({
+      title: `Hapus ${selectedPaths.length} item terpilih?`,
+      text: 'Seluruh file dan folder yang dipilih akan dihapus permanen.',
+      confirmText: 'Ya, Hapus Semua',
+      cancelText: 'Batal',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setBulkBusy(true);
     try {
       await apiFetch(`/api/servers/${serverId}/files`, {
         method: 'POST',
         body: JSON.stringify({
-          action: 'move',
-          path: moveModalPath,
-          newPath: destination,
+          action: 'deleteMany',
+          paths: selectedPaths,
         }),
       });
-      void showSuccessToast('Berhasil dipindahkan', destination);
-      setMoveModalPath(null);
+      if (selectedFile && selectedPaths.includes(selectedFile)) {
+        setSelectedFile(null);
+        setFileContent('');
+        setSavedContent('');
+      }
+      const deletedCount = selectedPaths.length;
+      setSelectedPaths([]);
+      void showSuccessToast('Berhasil dihapus', `${deletedCount} item dihapus.`);
+      await loadDirectory(currentDir);
+    } catch (err) {
+      await showErrorAlert(
+        'Gagal Menghapus Item',
+        err instanceof Error ? err.message : 'Gagal menghapus item terpilih.'
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleMoveEntries(e: React.FormEvent) {
+    e.preventDefault();
+    if (!moveModalPaths || moveModalPaths.length === 0) return;
+    const destination = newDestPath.trim();
+
+    setBulkBusy(true);
+    try {
+      if (moveModalPaths.length === 1) {
+        if (!destination) {
+          throw new Error('Path tujuan wajib diisi.');
+        }
+        await apiFetch(`/api/servers/${serverId}/files`, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'move',
+            path: moveModalPaths[0],
+            newPath: destination,
+          }),
+        });
+        void showSuccessToast('Berhasil dipindahkan', destination);
+      } else {
+        await apiFetch(`/api/servers/${serverId}/files`, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'moveMany',
+            paths: moveModalPaths,
+            targetDir: destination,
+          }),
+        });
+        void showSuccessToast(
+          'Berhasil dipindahkan',
+          `${moveModalPaths.length} item dipindahkan`
+        );
+      }
+      setMoveModalPaths(null);
       setNewDestPath('');
+      setSelectedPaths([]);
       await loadDirectory(currentDir);
     } catch (err) {
       await showErrorAlert(
         'Gagal Memindahkan Item',
         err instanceof Error ? err.message : 'Gagal memindahkan file/folder.'
       );
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -378,13 +549,14 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     if (!currentDir) return;
     const parts = currentDir.split('/');
     parts.pop();
+    setSelectedPaths([]);
     void loadDirectory(parts.join('/'));
   }
 
   const hasUnsavedChanges = selectedFile !== null && fileContent !== savedContent;
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto pb-10">
+    <div className="space-y-4 max-w-5xl mx-auto pb-20 relative">
       {/* File Manager Toolbar */}
       {!selectedFile && (
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:px-3.5 sm:py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -481,32 +653,81 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         </form>
       )}
 
-      {/* Move Modal */}
-      {moveModalPath && (
+      {/* Rename Modal */}
+      {renameModalPath && (
         <form
-          onSubmit={handleMoveEntry}
-          className="p-4 rounded bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 space-y-3"
+          onSubmit={handleRenameEntry}
+          onClick={(e) => e.stopPropagation()}
+          className="p-4 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 space-y-3"
         >
-          <div className="text-xs font-semibold">Pindahkan atau Ganti Path &quot;{moveModalPath}&quot;</div>
+          <div className="text-xs font-semibold">
+            Ganti Nama &quot;{renameModalPath}&quot;
+          </div>
           <input
             type="text"
             required
             autoFocus
-            value={newDestPath}
-            onChange={(e) => setNewDestPath(e.target.value)}
-            placeholder="path/baru/nama-folder"
-            className="w-full h-8 px-2.5 rounded bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-xs font-mono focus:outline-none"
+            aria-label="Nama baru"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            placeholder="nama-baru.ext"
+            className="w-full h-8 px-2.5 rounded bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-xs font-mono focus:outline-none focus:border-zinc-500"
           />
           <div className="flex items-center gap-2">
             <button
               type="submit"
               className="h-8 px-3 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-medium cursor-pointer"
             >
+              Simpan Nama
+            </button>
+            <button
+              type="button"
+              onClick={() => setRenameModalPath(null)}
+              className="h-8 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 text-xs cursor-pointer"
+            >
+              Batal
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Move Modal (Single or Multi) */}
+      {moveModalPaths && moveModalPaths.length > 0 && (
+        <form
+          onSubmit={handleMoveEntries}
+          onClick={(e) => e.stopPropagation()}
+          className="p-4 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 space-y-3"
+        >
+          <div className="text-xs font-semibold">
+            {moveModalPaths.length === 1
+              ? `Pindahkan "${moveModalPaths[0]}"`
+              : `Pindahkan ${moveModalPaths.length} item ke direktori tujuan`}
+          </div>
+          <input
+            type="text"
+            required={moveModalPaths.length === 1}
+            autoFocus
+            aria-label="Path tujuan"
+            value={newDestPath}
+            onChange={(e) => setNewDestPath(e.target.value)}
+            placeholder={
+              moveModalPaths.length === 1
+                ? 'path/baru/nama-file-atau-folder'
+                : 'folder-tujuan (kosongkan untuk root /)'
+            }
+            className="w-full h-8 px-2.5 rounded bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-xs font-mono focus:outline-none focus:border-zinc-500"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={bulkBusy}
+              className="h-8 px-3 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-medium cursor-pointer disabled:opacity-50"
+            >
               Pindahkan
             </button>
             <button
               type="button"
-              onClick={() => setMoveModalPath(null)}
+              onClick={() => setMoveModalPaths(null)}
               className="h-8 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 text-xs cursor-pointer"
             >
               Batal
@@ -584,81 +805,101 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
           ) : entries.length === 0 ? (
             <div className="p-8 text-xs text-zinc-500 text-center">Direktori ini masih kosong.</div>
           ) : (
-            <div
-              onScroll={() => {
-                if (activeMenuPath) {
-                  setActiveMenuPath(null);
-                  setMenuPosition(null);
-                }
-              }}
-              className="divide-y divide-zinc-100 dark:divide-zinc-800/60 overflow-y-auto max-h-[520px]"
-            >
-              {entries.map((entry) => {
-                const isZip = entry.name.toLowerCase().endsWith('.zip');
-                const isDir = entry.type === 'directory';
-                const isIgnored =
-                  entry.name === 'node_modules' ||
-                  entry.name === '.git' ||
-                  entry.name === '__pycache__' ||
-                  entry.name === '.venv' ||
-                  entry.name === '.py_packages';
+            <>
+              {/* Select All Header Row */}
+              {selectableEntries.length > 0 && (
+                <div className="px-3 sm:px-4 py-2 bg-zinc-50/80 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500">
+                  <label className="inline-flex items-center gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={allSelectableChecked}
+                      onChange={toggleSelectAll}
+                      aria-label="Pilih semua item"
+                      className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-900 dark:accent-zinc-100 cursor-pointer"
+                    />
+                    <span className="font-medium text-zinc-600 dark:text-zinc-400">
+                      {selectedPaths.length > 0
+                        ? `${selectedPaths.length} dipilih`
+                        : `${entries.length} item`}
+                    </span>
+                  </label>
+                </div>
+              )}
 
-                const canEdit = isEditableFile(entry.name);
+              <div
+                onScroll={() => {
+                  if (activeMenuPath) {
+                    setActiveMenuPath(null);
+                    setMenuPosition(null);
+                  }
+                }}
+                className="divide-y divide-zinc-100 dark:divide-zinc-800/70 overflow-y-auto max-h-[560px]"
+              >
+                {entries.map((entry) => {
+                  const isZip = entry.name.toLowerCase().endsWith('.zip');
+                  const isDir = entry.type === 'directory';
+                  const isIgnored = isSystemIgnoredDir(entry);
+                  const canEdit = !isDir && isEditableTextFile(entry.name);
+                  const isChecked = selectedPaths.includes(entry.path);
 
-                return (
-                  <div
-                    key={entry.path}
-                    className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 sm:gap-3 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/60 relative border-l-2 border-l-transparent hover:border-l-zinc-500"
-                  >
-                    <button
-                      type="button"
-                      disabled={isIgnored && isDir}
-                      onClick={() => {
-                        if (isDir) {
-                          loadDirectory(entry.path);
-                        } else {
-                          openFile(entry.path);
-                        }
-                      }}
-                      className="flex-1 flex items-center gap-2.5 text-left min-w-0 py-0.5 cursor-pointer disabled:opacity-50"
+                  return (
+                    <div
+                      key={entry.path}
+                      className={`px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 sm:gap-3 text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/60 relative ${
+                        isChecked ? 'bg-zinc-100/70 dark:bg-zinc-900/80' : ''
+                      }`}
                     >
-                      {isDir ? (
-                        <Folder className="w-4 h-4 text-amber-500 shrink-0" />
-                      ) : isZip ? (
-                        <FileArchive className="w-4 h-4 text-zinc-700 dark:text-zinc-100 shrink-0" />
-                      ) : (
-                        <FileCode2 className="w-4 h-4 text-zinc-400 shrink-0" />
-                      )}
-                      <span className={`font-mono truncate ${canEdit ? 'font-medium text-zinc-900 dark:text-zinc-100' : 'text-zinc-500'}`}>
-                        {entry.name}
-                      </span>
-                    </button>
+                      {/* Left Checkbox + Icon + Name */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <input
+                          type="checkbox"
+                          disabled={isIgnored}
+                          checked={isChecked}
+                          onChange={() => toggleSelectPath(entry.path)}
+                          aria-label={`Pilih ${entry.name}`}
+                          className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-zinc-900 dark:accent-zinc-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                        />
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      {entry.type === 'file' && !isZip && (
-                        <span className="text-[11px] font-mono tabular-nums text-zinc-500">
-                          {formatBytes(entry.size)}
-                        </span>
-                      )}
-
-                      {/* Folder Move Button */}
-                      {isDir && !isIgnored && (
                         <button
                           type="button"
+                          disabled={isIgnored}
                           onClick={() => {
-                            setMoveModalPath(entry.path);
-                            setNewDestPath(entry.path);
+                            if (isDir) {
+                              setSelectedPaths([]);
+                              void loadDirectory(entry.path);
+                            } else {
+                              void openFile(entry.path);
+                            }
                           }}
-                          aria-label={`Pindahkan ${entry.name}`}
-                          title="Pindahkan Folder"
-                          className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                          className="flex-1 flex items-center gap-2.5 text-left min-w-0 py-0.5 cursor-pointer disabled:opacity-50"
                         >
-                          <Move className="w-3.5 h-3.5" />
+                          {isDir ? (
+                            <Folder className="w-4 h-4 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                          ) : isZip ? (
+                            <FileArchive className="w-4 h-4 text-zinc-600 dark:text-zinc-300 shrink-0" />
+                          ) : (
+                            <FileCode2 className="w-4 h-4 text-zinc-400 shrink-0" />
+                          )}
+                          <span
+                            className={`font-mono truncate ${
+                              isDir || canEdit
+                                ? 'font-medium text-zinc-900 dark:text-zinc-100'
+                                : 'text-zinc-500 dark:text-zinc-400'
+                            }`}
+                          >
+                            {entry.name}
+                          </span>
                         </button>
-                      )}
+                      </div>
 
-                      {/* ZIP 3-Dot Menu */}
-                      {isZip ? (
+                      {/* Right Size + 3-Dot Action Menu */}
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        {entry.type === 'file' && (
+                          <span className="text-[11px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500 hidden sm:inline">
+                            {formatBytes(entry.size)}
+                          </span>
+                        )}
+
                         <div className="relative">
                           <button
                             type="button"
@@ -671,7 +912,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                               }
                               const rect = ev.currentTarget.getBoundingClientRect();
                               const openUpward =
-                                window.innerHeight - rect.bottom < 96 && rect.top > 96;
+                                window.innerHeight - rect.bottom < 210 && rect.top > 210;
                               setMenuPosition(
                                 openUpward
                                   ? {
@@ -685,12 +926,12 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                               );
                               setActiveMenuPath(entry.path);
                             }}
-                            aria-label={`Opsi ZIP ${entry.name}`}
+                            aria-label={`Menu aksi ${entry.name}`}
                             aria-haspopup="menu"
                             aria-expanded={activeMenuPath === entry.path}
-                            className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                            className="w-8 h-8 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                           >
-                            <MoreVertical className="w-4 h-4" />
+                            <MoreHorizontal className="w-4 h-4" />
                           </button>
 
                           {activeMenuPath === entry.path && menuPosition && (
@@ -703,22 +944,69 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                                 bottom: menuPosition.bottom,
                                 right: menuPosition.right,
                               }}
-                              className="w-36 rounded shadow-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 py-1 z-50 text-xs"
+                              className="w-44 rounded-md shadow-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 py-1 z-50 text-xs"
                             >
-                              <button
-                                type="button"
-                                role="menuitem"
-                                onClick={() => handleExtractZip(entry.path)}
-                                className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
-                              >
-                                <FileArchive className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-100 shrink-0" />
-                                <span>Ekstrak ZIP</span>
-                              </button>
+                              {!isIgnored && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setActiveMenuPath(null);
+                                    setRenameModalPath(entry.path);
+                                    setRenameValue(entry.name);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                                  <span>Ganti Nama</span>
+                                </button>
+                              )}
+
+                              {!isIgnored && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setActiveMenuPath(null);
+                                    setMoveModalPaths([entry.path]);
+                                    setNewDestPath(entry.path);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                >
+                                  <Move className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                                  <span>Pindahkan</span>
+                                </button>
+                              )}
+
+                              {isZip && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => handleExtractZip(entry.path)}
+                                  className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                >
+                                  <FileArchive className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                                  <span>Ekstrak ZIP</span>
+                                </button>
+                              )}
+
+                              {!isIgnored && !isZip && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => handleArchivePaths([entry.path])}
+                                  className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                >
+                                  <FileArchive className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                                  <span>Arsipkan (.zip)</span>
+                                </button>
+                              )}
+
                               <button
                                 type="button"
                                 role="menuitem"
                                 onClick={() => handleDeleteEntry(entry.path)}
-                                className="w-full px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                className="w-full px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 flex items-center gap-2 cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5 shrink-0" />
                                 <span>Hapus</span>
@@ -726,22 +1014,61 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                             </div>
                           )}
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEntry(entry.path)}
-                          aria-label={`Hapus ${entry.name}`}
-                          className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </>
           )}
+        </div>
+      )}
+
+      {/* Floating Multi-Select Action Bar (Matching cmnty Theme) */}
+      {!selectedFile && selectedPaths.length > 0 && (
+        <div className="sticky bottom-4 z-30 flex justify-center pointer-events-none">
+          <div className="pointer-events-auto inline-flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg bg-white/95 dark:bg-zinc-900/95 backdrop-blur border border-zinc-200 dark:border-zinc-700 shadow-2xl">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => {
+                setMoveModalPaths(selectedPaths);
+                setNewDestPath(currentDir);
+              }}
+              className="h-8 px-3 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 hover:opacity-90 disabled:opacity-50 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer transition-opacity"
+            >
+              <Move className="w-3.5 h-3.5 shrink-0" />
+              <span>Move</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => handleArchivePaths(selectedPaths)}
+              className="h-8 px-3 rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <FileArchive className="w-3.5 h-3.5 shrink-0" />
+              <span>Archive</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={handleBulkDelete}
+              className="h-8 px-3 rounded-md border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 disabled:opacity-50 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+              <span>Delete</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => setSelectedPaths([])}
+              aria-label="Batalkan pilihan"
+              title="Batalkan pilihan"
+              className="h-8 w-8 rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center justify-center cursor-pointer transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
     </div>

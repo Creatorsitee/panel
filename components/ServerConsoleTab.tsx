@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ChevronsRight,
+  CloudDownload,
+  CloudUpload,
   Play,
   RotateCw,
   Square,
@@ -21,6 +23,10 @@ import { apiFetch, buildAuthHeaders } from './api-client';
 import { ConsoleLinesSkeleton } from './Skeletons';
 import { tokenizeConsoleLine } from '@/lib/console-highlighter';
 import { connectSseStream } from '@/lib/sse-client';
+import {
+  formatNetworkAxisBytes,
+  formatNetworkRateLabel,
+} from '@/lib/network-stats-utils';
 import {
   getConsolePowerPermissions,
   getStatusDisplayLabel,
@@ -42,6 +48,8 @@ interface MetricSample {
   time: string;
   cpu: number;
   ram: number;
+  rx: number;
+  tx: number;
 }
 
 function useMeasuredChartWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 420): number {
@@ -151,6 +159,8 @@ export default function ServerConsoleTab({
       time: formatTimeLabel(),
       cpu: Number(server.metrics.cpuPercent.toFixed(2)),
       ram: Number(server.metrics.memoryMb.toFixed(1)),
+      rx: Math.max(0, Math.round(server.metrics.networkRxBytesPerSec || 0)),
+      tx: Math.max(0, Math.round(server.metrics.networkTxBytesPerSec || 0)),
     },
   ]);
   const [command, setCommand] = useState('');
@@ -165,8 +175,10 @@ export default function ServerConsoleTab({
   const commandInputRef = useRef<HTMLInputElement>(null);
   const cpuChartWrapRef = useRef<HTMLDivElement>(null);
   const ramChartWrapRef = useRef<HTMLDivElement>(null);
+  const netChartWrapRef = useRef<HTMLDivElement>(null);
   const cpuChartWidth = useMeasuredChartWidth(cpuChartWrapRef);
   const ramChartWidth = useMeasuredChartWidth(ramChartWrapRef);
+  const netChartWidth = useMeasuredChartWidth(netChartWrapRef);
   const draftCommandRef = useRef('');
   const onMetricsRef = useRef(onMetricsUpdate);
   const lastStreamMetricsAtRef = useRef<number>(0);
@@ -183,6 +195,8 @@ export default function ServerConsoleTab({
       time: formatTimeLabel(),
       cpu: Number((Number.isFinite(nextMetrics.cpuPercent) ? nextMetrics.cpuPercent : 0).toFixed(2)),
       ram: Number((Number.isFinite(nextMetrics.memoryMb) ? nextMetrics.memoryMb : 0).toFixed(1)),
+      rx: Math.max(0, Math.round(Number.isFinite(nextMetrics.networkRxBytesPerSec) ? nextMetrics.networkRxBytesPerSec : 0)),
+      tx: Math.max(0, Math.round(Number.isFinite(nextMetrics.networkTxBytesPerSec) ? nextMetrics.networkTxBytesPerSec : 0)),
     };
     setMetricsHistory((prev) => [...prev.slice(-29), sample]);
   };
@@ -240,7 +254,7 @@ export default function ServerConsoleTab({
     // Safety fallback if SSE pauses or delays delivering frames
     const fallbackTimer = setInterval(async () => {
       if (!active) return;
-      if (Date.now() - lastStreamMetricsAtRef.current < 1200) return;
+      if (Date.now() - lastStreamMetricsAtRef.current < 2500) return;
       try {
         const res = await apiFetch<{ server: ServerWithMetrics }>(`/api/servers/${server.id}`);
         if (!active || !res.server?.metrics) return;
@@ -250,7 +264,7 @@ export default function ServerConsoleTab({
       } catch {
         // ignore transient poll errors
       }
-    }, 1000);
+    }, 2000);
 
     return () => {
       active = false;
@@ -265,10 +279,9 @@ export default function ServerConsoleTab({
     }
   }, [logs, autoScroll]);
 
-  const powerPerms = getConsolePowerPermissions(metrics.status, metrics.awaitingInput);
+  const powerPerms = getConsolePowerPermissions(metrics.status);
   const statusDisplayLabel = getStatusDisplayLabel(metrics.status);
   const canSendInput = powerPerms.canSendInput;
-  const commandPlaceholder = 'Type a command...';
 
   useEffect(() => {
     if (canSendInput) {
@@ -312,12 +325,14 @@ export default function ServerConsoleTab({
     action: 'start' | 'stop' | 'restart' | 'kill'
   ) {
     setPowerLoading(action);
+    const previousMetrics = streamMetrics;
     if (action === 'start' || action === 'restart') {
       const optimisticStarting: ServerRuntimeMetrics = {
         ...metrics,
         status: 'starting',
         uptimeSeconds: 0,
-        awaitingInput: false,
+        networkRxBytesPerSec: 0,
+        networkTxBytesPerSec: 0,
       };
       setStreamMetrics(optimisticStarting);
       appendMetricSample(optimisticStarting);
@@ -335,7 +350,7 @@ export default function ServerConsoleTab({
       appendMetricSample(res.metrics);
       onMetricsUpdate(res.metrics);
       const toastMap: Record<typeof action, string> = {
-        start: 'Server dijalankan',
+        start: res.metrics.status === 'installing' ? 'Memasang dependensi server...' : 'Server dijalankan',
         restart: 'Server di-restart',
         stop: 'Server dihentikan',
         kill: 'Proses dihentikan paksa',
@@ -347,6 +362,16 @@ export default function ServerConsoleTab({
         void showInfoToast(toastMap[action]);
       }
     } catch (err) {
+      setStreamMetrics(previousMetrics);
+      try {
+        const fresh = await apiFetch<{ server: ServerWithMetrics }>(`/api/servers/${server.id}`);
+        if (fresh.server?.metrics) {
+          setStreamMetrics(fresh.server.metrics);
+          onMetricsRef.current(fresh.server.metrics);
+        }
+      } catch {
+        // ignore secondary refresh failure
+      }
       void showErrorToast(
         'Gagal Menjalankan Aksi',
         err instanceof Error ? err.message : 'Gagal menjalankan aksi power.'
@@ -495,6 +520,22 @@ export default function ServerConsoleTab({
     [ramChartMax]
   );
 
+  const netChartMax = useMemo(() => {
+    const peak = Math.max(
+      ...chartData.map((d) => Math.max(Number.isFinite(d.rx) ? d.rx : 0, Number.isFinite(d.tx) ? d.tx : 0)),
+      Number.isFinite(metrics.networkRxBytesPerSec) ? metrics.networkRxBytesPerSec : 0,
+      Number.isFinite(metrics.networkTxBytesPerSec) ? metrics.networkTxBytesPerSec : 0,
+      0
+    );
+    if (peak <= 0) return 100;
+    return Math.max(100, Math.ceil(peak * 1.25));
+  }, [chartData, metrics.networkRxBytesPerSec, metrics.networkTxBytesPerSec]);
+
+  const netChartTicks = useMemo(
+    () => Array.from(new Set([0, Math.round(netChartMax / 2), netChartMax])).sort((a, b) => a - b),
+    [netChartMax]
+  );
+
   function handleTerminalScroll() {
     const el = terminalRef.current;
     if (!el) return;
@@ -538,7 +579,7 @@ export default function ServerConsoleTab({
         </button>
         <button
           type="button"
-          disabled={!powerPerms.canStop || powerLoading !== null}
+          disabled={!powerPerms.canStop || powerLoading === 'stop' || powerLoading === 'kill'}
           onClick={() => runPowerAction('stop')}
           className="h-8 w-full px-3 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
         >
@@ -547,7 +588,7 @@ export default function ServerConsoleTab({
         </button>
         <button
           type="button"
-          disabled={!powerPerms.canKill || powerLoading !== null}
+          disabled={!powerPerms.canKill || powerLoading === 'kill'}
           onClick={() => runPowerAction('kill')}
           className="h-8 w-full px-3 rounded bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
           title="Kill paksa proses (SIGKILL)"
@@ -605,7 +646,17 @@ export default function ServerConsoleTab({
             ) : logs.length === 0 ? (
               <div className="font-mono break-words text-zinc-500">
                 <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
-                <span>Server marked as offline...</span>
+                <span>
+                  {metrics.status === 'running'
+                    ? 'Server marked as running...'
+                    : metrics.status === 'installing'
+                    ? 'Installing server dependencies...'
+                    : metrics.status === 'starting'
+                    ? 'Server marked as starting...'
+                    : metrics.status === 'stopping'
+                    ? 'Server marked as stopping...'
+                    : 'Server marked as offline...'}
+                </span>
               </div>
             ) : (
               logs.map((line) => {
@@ -662,11 +713,11 @@ export default function ServerConsoleTab({
             <button
               type="button"
               onClick={jumpToBottom}
-              aria-label="Scroll ke bawah console"
+              aria-label="Scroll console to bottom"
               className="absolute bottom-3 right-3 h-7 px-2.5 rounded bg-zinc-800/90 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-[11px] font-medium inline-flex items-center gap-1 shadow-md cursor-pointer transition-colors"
             >
               <ArrowDown className="w-3 h-3" />
-              <span>Scroll ke bawah</span>
+              <span>Scroll to bottom</span>
             </button>
           )}
         </div>
@@ -697,7 +748,7 @@ export default function ServerConsoleTab({
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            aria-label="Kirim input stdin ke proses server"
+            aria-label="Input a command"
             value={command}
             onChange={(e) => {
               setCommand(e.target.value);
@@ -707,7 +758,7 @@ export default function ServerConsoleTab({
               draftCommandRef.current = e.target.value;
             }}
             onKeyDown={handleCommandKeyDown}
-            placeholder={commandPlaceholder}
+            placeholder="Input a command..."
             className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:cursor-not-allowed"
           />
         </form>
@@ -760,8 +811,8 @@ export default function ServerConsoleTab({
           </div>
         </div>
 
-        {/* CPU Load & Memory Area Charts */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* CPU Load, Memory & Network Real-Time Area Charts */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* CPU Load Chart Card */}
           <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
@@ -872,6 +923,102 @@ export default function ServerConsoleTab({
                   dot={false}
                   activeDot={false}
                   fill={`url(#ramGrad-${server.id})`}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </div>
+          </div>
+
+          {/* Real-Time Network Chart Card (Inbound / Outbound) */}
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0 md:col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                Network
+              </h3>
+              <div className="flex items-center gap-3 text-[11px] font-mono tabular-nums">
+                <span
+                  className="inline-flex items-center gap-1 text-amber-500 dark:text-amber-400"
+                  title="Inbound (Download)"
+                >
+                  <CloudDownload className="w-3.5 h-3.5 shrink-0" />
+                  <span>{formatNetworkRateLabel(metrics.networkRxBytesPerSec || 0)}</span>
+                </span>
+                <span
+                  className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400"
+                  title="Outbound (Upload)"
+                >
+                  <CloudUpload className="w-3.5 h-3.5 shrink-0" />
+                  <span>{formatNetworkRateLabel(metrics.networkTxBytesPerSec || 0)}</span>
+                </span>
+              </div>
+            </div>
+            <div
+              ref={netChartWrapRef}
+              className="h-[176px] w-full min-w-0 overflow-hidden pointer-events-none select-none"
+            >
+              <AreaChart
+                width={netChartWidth}
+                height={176}
+                data={chartData}
+                accessibilityLayer={false}
+                margin={{ top: 10, right: 8, left: 4, bottom: 6 }}
+              >
+                <defs>
+                  <linearGradient
+                    id={`netRxGrad-${server.id}`}
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="0%" stopColor="#eab308" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#eab308" stopOpacity={0.03} />
+                  </linearGradient>
+                  <linearGradient
+                    id={`netTxGrad-${server.id}`}
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  stroke="currentColor"
+                  className="text-zinc-200 dark:text-zinc-800"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+                <XAxis dataKey="idx" type="number" domain={['dataMin', 'dataMax']} hide />
+                <YAxis
+                  domain={[0, netChartMax]}
+                  ticks={netChartTicks}
+                  axisLine={false}
+                  tickLine={false}
+                  width={64}
+                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  tickFormatter={(val: number) => formatNetworkAxisBytes(val)}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="rx"
+                  stroke="#eab308"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={false}
+                  fill={`url(#netRxGrad-${server.id})`}
+                  isAnimationActive={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="tx"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={false}
+                  fill={`url(#netTxGrad-${server.id})`}
                   isAnimationActive={false}
                 />
               </AreaChart>

@@ -24,3 +24,15 @@ export function subscribeWorkspaceEvents(listener: (reason: string) => void): ()
     bus.off('workspace:changed', listener);
   };
 }
+
+export function emitFilesChanged(serverId: string): void {
+  getRealtimeBus().emit('files:changed', serverId);
+}
+
+export function subscribeFilesChanged(listener: (serverId: string) => void): () => void {
+  const bus = getRealtimeBus();
+  bus.on('files:changed', listener);
+  return () => {
+    bus.off('files:changed', listener);
+  };
+}

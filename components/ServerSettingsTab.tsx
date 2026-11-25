@@ -35,6 +35,7 @@ export default function ServerSettingsTab({
 
   const [deleting, setDeleting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const lastSavedRef = useRef({
     name: server.name,
@@ -45,6 +46,52 @@ export default function ServerSettingsTab({
     memoryLimitMb: server.memoryLimitMb,
     cpuLimitPercent: server.cpuLimitPercent,
   });
+
+  useEffect(() => {
+    const saved = lastSavedRef.current;
+    const hasLocalEdits =
+      name.trim() !== saved.name ||
+      description !== saved.description ||
+      startupCommand.trim() !== saved.startupCommand ||
+      autoRestart !== saved.autoRestart ||
+      Number(portInput.trim() || server.port) !== saved.port ||
+      memoryLimitMb !== saved.memoryLimitMb ||
+      cpuLimitPercent !== saved.cpuLimitPercent;
+
+    if (!hasLocalEdits) {
+      setName(server.name);
+      setDescription(server.description);
+      setStartupCommand(server.startupCommand);
+      setAutoRestart(server.autoRestart);
+      setPortInput(String(server.port));
+      setMemoryLimitMb(server.memoryLimitMb);
+      setCpuLimitPercent(server.cpuLimitPercent);
+      lastSavedRef.current = {
+        name: server.name,
+        description: server.description,
+        startupCommand: server.startupCommand,
+        autoRestart: server.autoRestart,
+        port: server.port,
+        memoryLimitMb: server.memoryLimitMb,
+        cpuLimitPercent: server.cpuLimitPercent,
+      };
+    }
+  }, [
+    server.name,
+    server.description,
+    server.startupCommand,
+    server.autoRestart,
+    server.port,
+    server.memoryLimitMb,
+    server.cpuLimitPercent,
+    name,
+    description,
+    startupCommand,
+    autoRestart,
+    portInput,
+    memoryLimitMb,
+    cpuLimitPercent,
+  ]);
 
   const isServerActive =
     server.metrics.status === 'running' ||
@@ -120,6 +167,7 @@ export default function ServerSettingsTab({
     if (!isDirty) return;
 
     const timer = setTimeout(async () => {
+      setSaveStatus('saving');
       try {
         const res = await apiFetch<{ server: ServerWithMetrics }>(
           `/api/servers/${server.id}`,
@@ -146,8 +194,10 @@ export default function ServerSettingsTab({
           cpuLimitPercent: res.server.cpuLimitPercent,
         };
         setSaveError(null);
+        setSaveStatus('saved');
         onUpdatedRef.current(res.server);
       } catch (err) {
+        setSaveStatus('idle');
         setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan perubahan.');
       }
     }, 800);
@@ -180,10 +230,17 @@ export default function ServerSettingsTab({
 
   return (
     <div className="space-y-6 max-w-3xl pb-12">
-      <div>
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold tracking-tight text-zinc-800 dark:text-zinc-200">
           Pengaturan Server
         </h2>
+        <span className="text-[11px] font-mono text-zinc-500" role="status">
+          {saveStatus === 'saving'
+            ? 'Menyimpan...'
+            : saveStatus === 'saved' && !saveError
+            ? 'Tersimpan otomatis'
+            : ''}
+        </span>
       </div>
 
       <div className="space-y-6">

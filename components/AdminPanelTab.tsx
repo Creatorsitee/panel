@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRightLeft,
@@ -18,7 +18,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { ApiError, apiFetch, buildAuthHeaders } from './api-client';
+import { apiFetch, buildAuthHeaders } from './api-client';
 import CreateServerModal from './CreateServerModal';
 import { AdminTableSkeleton, ShimmerBlock } from './Skeletons';
 import { connectSseStream } from '@/lib/sse-client';
@@ -106,34 +106,12 @@ export default function AdminPanelTab({
 
   // Per-server busy state for quick actions
   const [busyServerId, setBusyServerId] = useState<string | null>(null);
+  const hasSnapshotRef = useRef(false);
+  const onWorkspaceRefreshRef = useRef(onWorkspaceRefresh);
 
-  const loadAdminData = useCallback(
-    async (options: { background?: boolean } = {}) => {
-      try {
-        const [usersRes, serversRes] = await Promise.all([
-          apiFetch<{ users: AdminUserSummary[] }>('/api/admin/users'),
-          apiFetch<{ servers: AdminServerSummary[]; host: HostInfo }>('/api/admin/servers'),
-        ]);
-        setUsers(usersRes.users);
-        setServers(serversRes.servers);
-        setHostInfo(serversRes.host);
-      } catch (err) {
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          onWorkspaceRefresh();
-          return;
-        }
-        if (!options.background) {
-          void showErrorToast(
-            'Gagal Memuat Data Admin',
-            err instanceof Error ? err.message : 'Terjadi kesalahan saat mengambil data admin.'
-          );
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [onWorkspaceRefresh]
-  );
+  useEffect(() => {
+    onWorkspaceRefreshRef.current = onWorkspaceRefresh;
+  }, [onWorkspaceRefresh]);
 
   useEffect(() => {
     let active = true;
@@ -145,7 +123,7 @@ export default function AdminPanelTab({
         if (!active) return;
         if (eventName === 'auth-error') {
           setLoading(false);
-          onWorkspaceRefresh();
+          onWorkspaceRefreshRef.current();
           return;
         }
         if (eventName === 'snapshot' && payload && typeof payload === 'object') {
@@ -163,6 +141,7 @@ export default function AdminPanelTab({
           if (data.host) {
             setHostInfo(data.host);
           }
+          hasSnapshotRef.current = true;
           setLoading(false);
         }
       },
@@ -170,8 +149,8 @@ export default function AdminPanelTab({
         if (!active) return;
         setLoading(false);
         if (status === 401 || status === 403) {
-          onWorkspaceRefresh();
-        } else {
+          onWorkspaceRefreshRef.current();
+        } else if (!hasSnapshotRef.current) {
           void showErrorToast(
             'Gagal Memuat Data Admin',
             'Terjadi kesalahan saat menghubungkan stream data admin.'
@@ -184,7 +163,7 @@ export default function AdminPanelTab({
       active = false;
       disconnect();
     };
-  }, [onWorkspaceRefresh]);
+  }, []);
 
   useEffect(() => {
     const hasOpenModal = createUserOpen || Boolean(editingUser) || Boolean(transferServer);
@@ -283,10 +262,12 @@ export default function AdminPanelTab({
         }
       );
       setUsers((prev) => prev.map((u) => (u.id === res.user.id ? res.user : u)));
+      const editedSelf = editingUser.id === currentUser.id;
       setEditingUser(null);
       void showSuccessToast('User diperbarui', res.user.email);
-      await loadAdminData({ background: true });
-      onWorkspaceRefresh();
+      if (editedSelf) {
+        onWorkspaceRefresh();
+      }
     } catch (err) {
       await showErrorAlert(
         'Gagal Memperbarui User',
@@ -322,9 +303,8 @@ export default function AdminPanelTab({
 
     try {
       await apiFetch(`/api/admin/users/${user.id}`, { method: 'DELETE' });
+      setUsers((prev) => prev.filter((u) => u.id !== user.id));
       void showSuccessToast('User dihapus', user.email);
-      await loadAdminData({ background: true });
-      onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
         'Gagal Menghapus User',
@@ -356,8 +336,6 @@ export default function AdminPanelTab({
       } else {
         void showInfoToast(toastText);
       }
-      await loadAdminData({ background: true });
-      onWorkspaceRefresh();
     } catch (err) {
       void showErrorToast(
         'Gagal Menjalankan Aksi',
@@ -381,9 +359,8 @@ export default function AdminPanelTab({
     setBusyServerId(srv.id);
     try {
       await apiFetch(`/api/servers/${srv.id}`, { method: 'DELETE' });
+      setServers((prev) => prev.filter((item) => item.id !== srv.id));
       void showSuccessToast('Server dihapus', srv.name);
-      await loadAdminData({ background: true });
-      onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
         'Gagal Menghapus Server',
@@ -407,8 +384,6 @@ export default function AdminPanelTab({
       });
       setTransferServer(null);
       void showSuccessToast('Kepemilikan dipindahkan');
-      await loadAdminData({ background: true });
-      onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
         'Gagal Memindahkan Server',
@@ -1123,8 +1098,7 @@ export default function AdminPanelTab({
         users={users}
         onClose={() => setCreateServerOpen(false)}
         onCreated={() => {
-          void loadAdminData({ background: true });
-          onWorkspaceRefresh();
+          setCreateServerOpen(false);
         }}
       />
 

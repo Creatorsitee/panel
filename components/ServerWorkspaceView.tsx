@@ -25,6 +25,7 @@ export default function ServerWorkspaceView({
     servers,
     hostInfo,
     loadingData,
+    deletedServerIds,
     handleMetricsUpdate,
     handleServerUpdated,
     handleServerDeleted,
@@ -32,11 +33,12 @@ export default function ServerWorkspaceView({
   } = usePanel();
 
   const server = servers.find((s) => s.id === serverId) || null;
+  const isDeleted = deletedServerIds.includes(serverId);
   const [checkedServerId, setCheckedServerId] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (server || loadingData || checkedServerId === serverId) return;
+    if (server || isDeleted || loadingData || checkedServerId === serverId) return;
 
     let active = true;
 
@@ -62,10 +64,10 @@ export default function ServerWorkspaceView({
     return () => {
       active = false;
     };
-  }, [server, loadingData, serverId, checkedServerId, upsertServer]);
+  }, [server, isDeleted, loadingData, serverId, checkedServerId, upsertServer]);
 
   if (!server) {
-    if (loadingData || checkedServerId !== serverId) {
+    if (isDeleted || loadingData || checkedServerId !== serverId) {
       return <ServerWorkspaceSkeleton tab={activeTab} />;
     }
 

@@ -59,6 +59,7 @@ export interface ConnectSseOptions {
   onHttpError?: (status: number) => void;
   onConnectionError?: () => void;
   reconnectDelayMs?: number;
+  staleTimeoutMs?: number;
 }
 
 export function connectSseStream(options: ConnectSseOptions): () => void {
@@ -70,14 +71,23 @@ export function connectSseStream(options: ConnectSseOptions): () => void {
     onHttpError,
     onConnectionError,
     reconnectDelayMs = 1500,
+    staleTimeoutMs = 15000,
   } = options;
 
   let active = true;
   let controller = new AbortController();
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let staleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearStaleTimer = () => {
+    if (staleTimer) {
+      clearTimeout(staleTimer);
+      staleTimer = null;
+    }
+  };
 
   const scheduleReconnect = () => {
-    if (!active || controller.signal.aborted) return;
+    if (!active) return;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {
       if (active) void connect();
@@ -86,6 +96,17 @@ export function connectSseStream(options: ConnectSseOptions): () => void {
 
   async function connect() {
     controller = new AbortController();
+    let timedOut = false;
+
+    const resetStaleTimer = () => {
+      clearStaleTimer();
+      if (!active || staleTimeoutMs <= 0) return;
+      staleTimer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, staleTimeoutMs);
+    };
+
     try {
       const res = await fetch(url, {
         method: 'GET',
@@ -107,10 +128,12 @@ export function connectSseStream(options: ConnectSseOptions): () => void {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      resetStaleTimer();
 
       while (active) {
         const { value, done } = await reader.read();
         if (done) break;
+        resetStaleTimer();
         buffer += decoder.decode(value, { stream: true });
 
         const parsed = parseSseBuffer(buffer);
@@ -128,9 +151,11 @@ export function connectSseStream(options: ConnectSseOptions): () => void {
         }
       }
 
+      clearStaleTimer();
       scheduleReconnect();
     } catch {
-      if (active && !controller.signal.aborted) {
+      clearStaleTimer();
+      if (active && (timedOut || !controller.signal.aborted)) {
         onConnectionError?.();
         scheduleReconnect();
       }
@@ -141,6 +166,7 @@ export function connectSseStream(options: ConnectSseOptions): () => void {
 
   return () => {
     active = false;
+    clearStaleTimer();
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;

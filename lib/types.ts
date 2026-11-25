@@ -47,10 +47,11 @@ export interface ServerRuntimeMetrics {
   pid: number | null;
   cpuPercent: number;
   memoryMb: number;
+  networkRxBytesPerSec: number;
+  networkTxBytesPerSec: number;
   uptimeSeconds: number;
   exitCode: number | null;
   startedAt: string | null;
-  awaitingInput: boolean;
 }
 
 export interface ServerWithMetrics extends ServerConfig {
