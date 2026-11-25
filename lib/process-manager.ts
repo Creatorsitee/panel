@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -13,14 +14,16 @@ import {
 } from './file-manager';
 import {
   computeCpuPercentDelta,
+  computePanelQuotaSummary,
   parseMeminfoSwapMb,
   parseOsPrettyName,
   parseProcStatCpuSnapshot,
   type ProcCpuSnapshot,
+  type ServerQuotaSample,
 } from './host-stats-utils';
 import { parseSafeStartupCommand } from './security';
 import { emitWorkspaceChanged } from './realtime-bus';
-import type { ConsoleLine, HostVpsInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
+import type { ConsoleLine, HostInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
 
 interface PartialStreamBuffer {
   text: string;
@@ -37,6 +40,11 @@ interface ManagedProcess {
   exitCode: number | null;
   manualStop: boolean;
   oomKilled: boolean;
+  awaitingInput: boolean;
+  stdinSockServer: net.Server | null;
+  stdinSockPath: string | null;
+  stdinSyncFile: string | null;
+  stdinSyncWatcher: fs.FSWatcher | null;
   logs: ConsoleLine[];
   partialBuffers: {
     stdout: PartialStreamBuffer;
@@ -92,6 +100,11 @@ function getOrCreateState(serverId: string): ManagedProcess {
       exitCode: null,
       manualStop: false,
       oomKilled: false,
+      awaitingInput: false,
+      stdinSockServer: null,
+      stdinSockPath: null,
+      stdinSyncFile: null,
+      stdinSyncWatcher: null,
       logs: [],
       partialBuffers: {
         stdout: { text: '', timer: null },
@@ -103,6 +116,379 @@ function getOrCreateState(serverId: string): ManagedProcess {
     map.set(serverId, state);
   }
   return state;
+}
+
+const RUNTIME_HOOKS_DIR = path.join(os.tmpdir(), 'cmnty-runtime-hooks');
+const NODE_STDIN_HOOK_PATH = path.join(RUNTIME_HOOKS_DIR, 'node-stdin-hook.cjs');
+const PYTHON_HOOK_DIR = path.join(RUNTIME_HOOKS_DIR, 'python');
+const PYTHON_SITECUSTOMIZE_PATH = path.join(PYTHON_HOOK_DIR, 'sitecustomize.py');
+
+const NODE_STDIN_HOOK_SOURCE = `'use strict';
+const net = require('net');
+const fs = require('fs');
+
+const sockPath = process.env.CMNTY_STDIN_SOCK;
+const syncFile = process.env.CMNTY_STDIN_SYNC_FILE;
+const scriptPath = process.argv[1] || '';
+const isPackageRunner = /(?:^|[\\/\\\\])(?:npm|npx)-cli\\.js$|(?:^|[\\/\\\\])(?:yarn|pnpm)\\.(?:c?js|mjs)$/i.test(scriptPath);
+
+if (sockPath && !isPackageRunner) {
+  let lastAsync = null;
+  let syncDepth = 0;
+
+  function sendState(awaiting) {
+    try {
+      const conn = net.createConnection(sockPath, () => {
+        conn.end(JSON.stringify({ pid: process.pid, awaiting: Boolean(awaiting) }) + '\\n');
+      });
+      conn.on('error', () => {});
+      conn.unref();
+    } catch {}
+  }
+
+  function updateAsyncState(active) {
+    const next = Boolean(active) || syncDepth > 0;
+    if (lastAsync === next) return;
+    lastAsync = next;
+    sendState(next);
+  }
+
+  function hasStdinListeners() {
+    try {
+      return (
+        process.stdin.listenerCount('data') > 0 ||
+        process.stdin.listenerCount('readable') > 0 ||
+        Boolean(process.stdin.readableFlowing)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  const stdin = process.stdin;
+  const origOn = stdin.on.bind(stdin);
+  const origAdd = stdin.addListener.bind(stdin);
+  const origOnce = stdin.once.bind(stdin);
+  const origPrepend = stdin.prependListener.bind(stdin);
+  const origPrependOnce = stdin.prependOnceListener.bind(stdin);
+  const origOff = stdin.off.bind(stdin);
+  const origRemove = stdin.removeListener.bind(stdin);
+  const origRemoveAll = stdin.removeAllListeners.bind(stdin);
+  const origResume = stdin.resume.bind(stdin);
+  const origPause = stdin.pause.bind(stdin);
+  const origPipe = stdin.pipe.bind(stdin);
+  const origUnpipe = stdin.unpipe.bind(stdin);
+  const origAsyncIter = stdin[Symbol.asyncIterator].bind(stdin);
+
+  stdin.on = function (ev, fn) {
+    const res = origOn(ev, fn);
+    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
+    return res;
+  };
+  stdin.addListener = function (ev, fn) {
+    const res = origAdd(ev, fn);
+    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
+    return res;
+  };
+  stdin.once = function (ev, fn) {
+    const res = origOnce(ev, fn);
+    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
+    return res;
+  };
+  stdin.prependListener = function (ev, fn) {
+    const res = origPrepend(ev, fn);
+    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
+    return res;
+  };
+  stdin.prependOnceListener = function (ev, fn) {
+    const res = origPrependOnce(ev, fn);
+    if (ev === 'data' || ev === 'readable') updateAsyncState(true);
+    return res;
+  };
+  stdin.off = function (ev, fn) {
+    const res = origOff(ev, fn);
+    updateAsyncState(hasStdinListeners());
+    return res;
+  };
+  stdin.removeListener = function (ev, fn) {
+    const res = origRemove(ev, fn);
+    updateAsyncState(hasStdinListeners());
+    return res;
+  };
+  stdin.removeAllListeners = function (ev) {
+    const res = origRemoveAll(ev);
+    updateAsyncState(hasStdinListeners());
+    return res;
+  };
+  stdin.resume = function () {
+    const res = origResume();
+    updateAsyncState(true);
+    return res;
+  };
+  stdin.pause = function () {
+    const res = origPause();
+    updateAsyncState(false);
+    return res;
+  };
+  stdin.pipe = function (...args) {
+    updateAsyncState(true);
+    return origPipe(...args);
+  };
+  stdin.unpipe = function (...args) {
+    const res = origUnpipe(...args);
+    updateAsyncState(hasStdinListeners());
+    return res;
+  };
+  stdin[Symbol.asyncIterator] = async function* () {
+    updateAsyncState(true);
+    try {
+      for await (const chunk of origAsyncIter()) {
+        yield chunk;
+      }
+    } finally {
+      updateAsyncState(hasStdinListeners());
+    }
+  };
+
+  if (syncFile) {
+    const writeSyncState = (val) => {
+      try {
+        fs.writeFileSync(syncFile, val, 'utf8');
+      } catch {}
+    };
+    const origReadSync = fs.readSync.bind(fs);
+    fs.readSync = function (fd, ...args) {
+      if (fd === 0) {
+        syncDepth += 1;
+        writeSyncState('1');
+        try {
+          return origReadSync(fd, ...args);
+        } finally {
+          syncDepth = Math.max(0, syncDepth - 1);
+          if (syncDepth === 0) writeSyncState('0');
+        }
+      }
+      return origReadSync(fd, ...args);
+    };
+    const origReadFileSync = fs.readFileSync.bind(fs);
+    fs.readFileSync = function (fileOrFd, ...args) {
+      if (fileOrFd === 0) {
+        syncDepth += 1;
+        writeSyncState('1');
+        try {
+          return origReadFileSync(fileOrFd, ...args);
+        } finally {
+          syncDepth = Math.max(0, syncDepth - 1);
+          if (syncDepth === 0) writeSyncState('0');
+        }
+      }
+      return origReadFileSync(fileOrFd, ...args);
+    };
+  }
+}
+`;
+
+const PYTHON_SITECUSTOMIZE_SOURCE = `import builtins
+import json
+import os
+import socket
+import sys
+
+_sock_path = os.environ.get("CMNTY_STDIN_SOCK")
+
+if _sock_path:
+    _depth = 0
+
+    def _report(awaiting):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(_sock_path)
+            s.sendall((json.dumps({"pid": os.getpid(), "awaiting": bool(awaiting)}) + "\\n").encode("utf-8"))
+            s.close()
+        except Exception:
+            pass
+
+    def _enter_stdin():
+        global _depth
+        _depth += 1
+        if _depth == 1:
+            _report(True)
+
+    def _exit_stdin():
+        global _depth
+        _depth = max(0, _depth - 1)
+        if _depth == 0:
+            _report(False)
+
+    _orig_input = builtins.input
+
+    def _cmnty_input(prompt=""):
+        _enter_stdin()
+        try:
+            return _orig_input(prompt)
+        finally:
+            _exit_stdin()
+
+    builtins.input = _cmnty_input
+
+    class _CmntyStdinWrapper:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def readline(self, *args, **kwargs):
+            _enter_stdin()
+            try:
+                return self._inner.readline(*args, **kwargs)
+            finally:
+                _exit_stdin()
+
+        def read(self, *args, **kwargs):
+            _enter_stdin()
+            try:
+                return self._inner.read(*args, **kwargs)
+            finally:
+                _exit_stdin()
+
+        def readlines(self, *args, **kwargs):
+            _enter_stdin()
+            try:
+                return self._inner.readlines(*args, **kwargs)
+            finally:
+                _exit_stdin()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            _enter_stdin()
+            try:
+                return next(self._inner)
+            finally:
+                _exit_stdin()
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    if sys.stdin is not None:
+        sys.stdin = _CmntyStdinWrapper(sys.stdin)
+`;
+
+function ensureRuntimeHooks(): void {
+  if (!fs.existsSync(PYTHON_HOOK_DIR)) {
+    fs.mkdirSync(PYTHON_HOOK_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(NODE_STDIN_HOOK_PATH) || fs.readFileSync(NODE_STDIN_HOOK_PATH, 'utf8') !== NODE_STDIN_HOOK_SOURCE) {
+    fs.writeFileSync(NODE_STDIN_HOOK_PATH, NODE_STDIN_HOOK_SOURCE, 'utf8');
+  }
+  if (!fs.existsSync(PYTHON_SITECUSTOMIZE_PATH) || fs.readFileSync(PYTHON_SITECUSTOMIZE_PATH, 'utf8') !== PYTHON_SITECUSTOMIZE_SOURCE) {
+    fs.writeFileSync(PYTHON_SITECUSTOMIZE_PATH, PYTHON_SITECUSTOMIZE_SOURCE, 'utf8');
+  }
+}
+
+function cleanupStdinMonitor(state: ManagedProcess): void {
+  state.awaitingInput = false;
+  if (state.stdinSyncWatcher) {
+    try {
+      state.stdinSyncWatcher.close();
+    } catch {
+      // ignore
+    }
+    state.stdinSyncWatcher = null;
+  }
+  if (state.stdinSockServer) {
+    try {
+      state.stdinSockServer.close();
+    } catch {
+      // ignore
+    }
+    state.stdinSockServer = null;
+  }
+  if (state.stdinSockPath) {
+    try {
+      fs.rmSync(state.stdinSockPath, { force: true });
+    } catch {
+      // ignore
+    }
+    state.stdinSockPath = null;
+  }
+  if (state.stdinSyncFile) {
+    try {
+      fs.rmSync(state.stdinSyncFile, { force: true });
+    } catch {
+      // ignore
+    }
+    state.stdinSyncFile = null;
+  }
+}
+
+function setupStdinMonitor(serverId: string, state: ManagedProcess): {
+  sockPath: string;
+  syncFile: string;
+} {
+  cleanupStdinMonitor(state);
+  ensureRuntimeHooks();
+
+  const token = crypto.randomBytes(5).toString('hex');
+  const sockPath = path.join(os.tmpdir(), `cmnty-stdin-${serverId}-${token}.sock`);
+  const syncFile = path.join(os.tmpdir(), `cmnty-stdin-${serverId}-${token}.sync`);
+  fs.writeFileSync(syncFile, '0', 'utf8');
+
+  const applyAwaitingState = (nextAwaiting: boolean) => {
+    if (state.status !== 'running' && nextAwaiting) return;
+    if (state.awaitingInput === nextAwaiting) return;
+    state.awaitingInput = nextAwaiting;
+    emitStatus(serverId);
+  };
+
+  const server = net.createServer((conn) => {
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      let nl = buf.indexOf('\n');
+      while (nl !== -1) {
+        const rawLine = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (rawLine) {
+          try {
+            const msg = JSON.parse(rawLine) as { awaiting?: boolean };
+            applyAwaitingState(Boolean(msg.awaiting));
+          } catch {
+            // ignore malformed frame
+          }
+        }
+        nl = buf.indexOf('\n');
+      }
+    });
+    conn.on('error', () => {
+      // ignore client disconnect
+    });
+  });
+
+  server.on('error', () => {
+    // ignore transient socket errors
+  });
+  server.listen(sockPath);
+
+  let watcher: fs.FSWatcher | null = null;
+  try {
+    watcher = fs.watch(syncFile, () => {
+      try {
+        const val = fs.readFileSync(syncFile, 'utf8').trim();
+        applyAwaitingState(val === '1');
+      } catch {
+        // ignore
+      }
+    });
+  } catch {
+    watcher = null;
+  }
+
+  state.stdinSockServer = server;
+  state.stdinSockPath = sockPath;
+  state.stdinSyncFile = syncFile;
+  state.stdinSyncWatcher = watcher;
+
+  return { sockPath, syncFile };
 }
 
 function pushConsoleLine(
@@ -230,19 +616,29 @@ function collectProcessGroupPids(rootPid: number): number[] {
 }
 
 function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memoryMb: number } {
-  if (!state.pid || state.status !== 'running') {
+  const isActiveState =
+    state.status === 'running' ||
+    state.status === 'starting' ||
+    state.status === 'installing' ||
+    state.status === 'stopping';
+  if (!state.pid || !isActiveState) {
     return { cpuPercent: 0, memoryMb: 0 };
   }
 
   try {
     process.kill(state.pid, 0);
   } catch {
-    state.status = 'stopped';
-    state.pid = null;
-    state.child = null;
-    state.startedAtMs = null;
-    state.cpuPercent = 0;
-    state.memoryMb = 0;
+    if (state.status === 'running') {
+      cleanupStdinMonitor(state);
+      state.status = 'stopped';
+      state.pid = null;
+      state.child = null;
+      state.startedAtMs = null;
+      state.cpuPercent = 0;
+      state.memoryMb = 0;
+    } else if (!state.child) {
+      state.pid = null;
+    }
     return { cpuPercent: 0, memoryMb: 0 };
   }
 
@@ -334,8 +730,13 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
 export function getServerMetrics(serverId: string): ServerRuntimeMetrics {
   const state = getOrCreateState(serverId);
   const { cpuPercent, memoryMb } = readLinuxProcStats(state);
+  const isActive =
+    state.status === 'running' ||
+    state.status === 'starting' ||
+    state.status === 'installing' ||
+    state.status === 'stopping';
   const uptimeSeconds =
-    state.status === 'running' && state.startedAtMs
+    isActive && state.startedAtMs
       ? Math.max(0, Math.floor((Date.now() - state.startedAtMs) / 1000))
       : 0;
 
@@ -347,6 +748,10 @@ export function getServerMetrics(serverId: string): ServerRuntimeMetrics {
     uptimeSeconds,
     exitCode: state.exitCode,
     startedAt: state.startedAtMs ? new Date(state.startedAtMs).toISOString() : null,
+    awaitingInput:
+      state.status === 'running' || state.status === 'starting'
+        ? state.awaitingInput
+        : false,
   };
 }
 
@@ -387,7 +792,10 @@ export function subscribeConsole(
   };
 }
 
-function buildSafeEnv(serverId: string): NodeJS.ProcessEnv {
+function buildSafeEnv(
+  serverId: string,
+  stdinMonitor?: { sockPath: string; syncFile: string }
+): NodeJS.ProcessEnv {
   const server = getServerById(serverId);
   if (!server) {
     throw new Error('Server tidak ditemukan.');
@@ -396,14 +804,32 @@ function buildSafeEnv(serverId: string): NodeJS.ProcessEnv {
   const cwd = ensureServerDir(serverId);
   const diskEnv = readServerDotEnv(serverId);
   const existingNodeOpts = diskEnv.NODE_OPTIONS ? `${diskEnv.NODE_OPTIONS} ` : '';
-  const nodeOptions =
+  let nodeOptions =
     server.runtime === 'nodejs' && !existingNodeOpts.includes('--max-old-space-size')
       ? `${existingNodeOpts}--max-old-space-size=${server.memoryLimitMb}`.trim()
       : diskEnv.NODE_OPTIONS;
 
   const pyPackagesDir = path.join(cwd, '.py_packages');
-  const pythonPath =
-    server.runtime === 'python' && fs.existsSync(pyPackagesDir) ? pyPackagesDir : undefined;
+  const pythonPaths: string[] = [];
+  if (server.runtime === 'python') {
+    if (stdinMonitor) {
+      pythonPaths.push(PYTHON_HOOK_DIR);
+    }
+    if (fs.existsSync(pyPackagesDir)) {
+      pythonPaths.push(pyPackagesDir);
+    }
+  }
+  if (diskEnv.PYTHONPATH) {
+    pythonPaths.push(diskEnv.PYTHONPATH);
+  }
+  const pythonPath = pythonPaths.length > 0 ? pythonPaths.join(path.delimiter) : undefined;
+
+  if (server.runtime === 'nodejs' && stdinMonitor) {
+    const requireFlag = NODE_STDIN_HOOK_PATH.includes(' ')
+      ? `--require "${NODE_STDIN_HOOK_PATH}"`
+      : `--require ${NODE_STDIN_HOOK_PATH}`;
+    nodeOptions = nodeOptions ? `${nodeOptions} ${requireFlag}`.trim() : requireFlag;
+  }
 
   const basePath =
     process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
@@ -429,6 +855,12 @@ function buildSafeEnv(serverId: string): NodeJS.ProcessEnv {
     ...diskEnv,
     ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}),
     ...(pythonPath ? { PYTHONPATH: pythonPath } : {}),
+    ...(stdinMonitor
+      ? {
+          CMNTY_STDIN_SOCK: stdinMonitor.sockPath,
+          CMNTY_STDIN_SYNC_FILE: stdinMonitor.syncFile,
+        }
+      : {}),
   } as unknown as NodeJS.ProcessEnv;
 }
 
@@ -468,6 +900,8 @@ function runProcessCommand(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     state.installChild = child;
+    state.pid = child.pid ?? null;
+    emitStatus(serverId);
     child.stdin.on('error', () => {
       // ignore EPIPE if process exits mid-write
     });
@@ -477,13 +911,19 @@ function runProcessCommand(
     child.on('error', (err) => {
       flushStreamBuffer(serverId, 'stdout');
       flushStreamBuffer(serverId, 'stderr');
-      if (state.installChild === child) state.installChild = null;
+      if (state.installChild === child) {
+        state.installChild = null;
+        if (!state.child) state.pid = null;
+      }
       reject(new Error(`Failed to execute ${executable}: ${err.message}`));
     });
     child.on('close', (code) => {
       flushStreamBuffer(serverId, 'stdout');
       flushStreamBuffer(serverId, 'stderr');
-      if (state.installChild === child) state.installChild = null;
+      if (state.installChild === child) {
+        state.installChild = null;
+        if (!state.child) state.pid = null;
+      }
       if (state.manualStop) {
         reject(new Error('Installation aborted by user.'));
         return;
@@ -680,6 +1120,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   }
 
   state.status = 'starting';
+  state.startedAtMs = Date.now();
   state.manualStop = false;
   state.oomKilled = false;
   state.exitCode = null;
@@ -742,13 +1183,16 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
       : resolveNodeExecutable(cwd, parsed.executable);
 
   state.status = 'starting';
+  state.awaitingInput = false;
   emitStatus(serverId);
 
   appendLog(serverId, 'system', `container@cmnty~ ${server.startupCommand}`);
 
+  const stdinMonitor = setupStdinMonitor(serverId, state);
+
   const child = spawn(launchExecutable, parsed.args, {
     cwd,
-    env: buildSafeEnv(serverId),
+    env: buildSafeEnv(serverId, stdinMonitor),
     shell: false,
     detached: process.platform !== 'win32',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -776,6 +1220,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   child.on('error', (err) => {
     flushStreamBuffer(serverId, 'stdout');
     flushStreamBuffer(serverId, 'stderr');
+    cleanupStdinMonitor(state);
     appendLog(serverId, 'system', `Failed to start container process: ${err.message}`);
     state.status = 'error';
     state.child = null;
@@ -788,6 +1233,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   child.on('close', (code) => {
     flushStreamBuffer(serverId, 'stdout');
     flushStreamBuffer(serverId, 'stderr');
+    cleanupStdinMonitor(state);
     state.child = null;
     state.pid = null;
     state.exitCode = code;
@@ -849,6 +1295,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
 
   state.manualStop = true;
   state.status = 'stopping';
+  state.awaitingInput = false;
   emitStatus(serverId);
   const child = state.child;
 
@@ -879,6 +1326,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
     });
   });
 
+  cleanupStdinMonitor(state);
   return getServerMetrics(serverId);
 }
 
@@ -893,14 +1341,13 @@ export async function restartServerProcess(serverId: string): Promise<ServerRunt
 export function sendStdinToServer(serverId: string, input: string): void {
   const state = getOrCreateState(serverId);
   const targetChild =
-    state.status === 'running' || state.status === 'starting'
-      ? state.child
-      : state.status === 'installing'
-      ? state.installChild
-      : null;
+    state.status === 'running' || state.status === 'starting' ? state.child : null;
 
   if (!targetChild || !targetChild.stdin || targetChild.stdin.destroyed || !targetChild.stdin.writable) {
     throw new Error('Server tidak sedang berjalan. Start server terlebih dahulu untuk mengirim input.');
+  }
+  if (!state.awaitingInput) {
+    throw new Error('Program tidak sedang meminta input (stdin).');
   }
   appendLog(serverId, 'stdin', `> ${input}`);
   targetChild.stdin.write(`${input}\n`);
@@ -974,7 +1421,20 @@ function getSystemVersions(): {
 }
 
 function getPrimaryIpv4Address(): string | null {
-  return '103.250.100.10';
+  try {
+    const nets = os.networkInterfaces();
+    for (const ifaceList of Object.values(nets)) {
+      if (!ifaceList) continue;
+      for (const iface of ifaceList) {
+        if (iface.family === 'IPv4' && !iface.internal && iface.address) {
+          return iface.address;
+        }
+      }
+    }
+  } catch {
+    // ignore network interface lookup failures
+  }
+  return null;
 }
 
 function detectDiskStatsGb(): { diskTotalGb: number; diskUsedGb: number; diskFreeGb: number } {
@@ -997,6 +1457,23 @@ function detectDiskStatsGb(): { diskTotalGb: number; diskUsedGb: number; diskFre
     return { diskTotalGb: 0, diskUsedGb: 0, diskFreeGb: 0 };
   }
 }
+
+function primeHostCpuBaseline(): void {
+  if (globalForPm.__nodalHostCpuSample) return;
+  try {
+    if (fs.existsSync('/proc/stat')) {
+      const stat = fs.readFileSync('/proc/stat', 'utf8');
+      const snap = parseProcStatCpuSnapshot(stat);
+      if (snap) {
+        globalForPm.__nodalHostCpuSample = snap;
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+primeHostCpuBaseline();
 
 function detectHostCpuPercent(load1m: number, cpuCores: number): number {
   try {
@@ -1060,7 +1537,15 @@ function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
               fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8').trim()
             );
             if (Number.isFinite(rawCur) && rawCur >= 0) {
-              usedMb = Math.round(rawCur / 1024 / 1024);
+              let inactiveFileBytes = 0;
+              if (fs.existsSync('/sys/fs/cgroup/memory.stat')) {
+                const memStat = fs.readFileSync('/sys/fs/cgroup/memory.stat', 'utf8');
+                const inactiveMatch = /^inactive_file\s+(\d+)/m.exec(memStat);
+                if (inactiveMatch) {
+                  inactiveFileBytes = Number(inactiveMatch[1]) || 0;
+                }
+              }
+              usedMb = Math.max(0, Math.round((rawCur - inactiveFileBytes) / 1024 / 1024));
             }
           }
           return {
@@ -1089,7 +1574,15 @@ function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
                 .trim()
             );
             if (Number.isFinite(rawCur) && rawCur >= 0) {
-              usedMb = Math.round(rawCur / 1024 / 1024);
+              let inactiveFileBytes = 0;
+              if (fs.existsSync('/sys/fs/cgroup/memory/memory.stat')) {
+                const memStat = fs.readFileSync('/sys/fs/cgroup/memory/memory.stat', 'utf8');
+                const inactiveMatch = /^total_inactive_file\s+(\d+)/m.exec(memStat);
+                if (inactiveMatch) {
+                  inactiveFileBytes = Number(inactiveMatch[1]) || 0;
+                }
+              }
+              usedMb = Math.max(0, Math.round((rawCur - inactiveFileBytes) / 1024 / 1024));
             }
           }
           return {
@@ -1117,9 +1610,19 @@ function detectEffectiveCpuCores(hostCpuCount: number): number {
       if (parts.length >= 2 && parts[0] !== 'max') {
         const quota = Number(parts[0]);
         const period = Number(parts[1]);
-        if (Number.isFinite(quota) && Number.isFinite(period) && period > 0) {
+        if (Number.isFinite(quota) && Number.isFinite(period) && quota > 0 && period > 0) {
           return Math.max(1, Math.min(baseCores, Math.round(quota / period)));
         }
+      }
+    }
+    if (
+      fs.existsSync('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') &&
+      fs.existsSync('/sys/fs/cgroup/cpu/cpu.cfs_period_us')
+    ) {
+      const quota = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_quota_us', 'utf8').trim());
+      const period = Number(fs.readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_period_us', 'utf8').trim());
+      if (Number.isFinite(quota) && Number.isFinite(period) && quota > 0 && period > 0) {
+        return Math.max(1, Math.min(baseCores, Math.round(quota / period)));
       }
     }
   } catch {
@@ -1148,7 +1651,7 @@ function resolveCpuModel(rawModel: string | undefined, arch: string): string {
   return `Virtual CPU (${arch})`;
 }
 
-export function getHostVpsInfo(): HostVpsInfo {
+export function getHostInfo(): HostInfo {
   const { totalMemMb, freeMemMb } = detectEffectiveMemoryMb();
   const swap = detectSwapMb();
   const disk = detectDiskStatsGb();
@@ -1159,38 +1662,34 @@ export function getHostVpsInfo(): HostVpsInfo {
   const versions = getSystemVersions();
 
   const processMap = getProcessMap();
-  let activeCount = 0;
-  let activeAllocatedMemoryMb = 0;
-  let activeUsedRssMb = 0;
-  let activeAllocatedCpuPercent = 0;
-
   const allServers = listAllServers();
-  for (const srv of allServers) {
+  const quotaSamples: ServerQuotaSample[] = allServers.map((srv) => {
     const proc = processMap.get(srv.id);
-    const isActive =
+    const isActive = Boolean(
       proc &&
-      (proc.status === 'running' ||
-        proc.status === 'starting' ||
-        proc.status === 'stopping' ||
-        proc.status === 'installing');
-    if (isActive) {
-      if (proc.status === 'running') {
-        activeCount += 1;
-      }
-      const { memoryMb } = readLinuxProcStats(proc);
-      activeUsedRssMb += memoryMb;
-      activeAllocatedMemoryMb += Number.isFinite(srv.memoryLimitMb) ? srv.memoryLimitMb : 0;
-      activeAllocatedCpuPercent += Number.isFinite(srv.cpuLimitPercent) ? srv.cpuLimitPercent : 0;
-    }
-  }
+        (proc.status === 'running' ||
+          proc.status === 'starting' ||
+          proc.status === 'stopping' ||
+          proc.status === 'installing')
+    );
+    const stats = isActive && proc ? readLinuxProcStats(proc) : { cpuPercent: 0, memoryMb: 0 };
+    return {
+      memoryLimitMb: srv.memoryLimitMb,
+      cpuLimitPercent: srv.cpuLimitPercent,
+      isActive,
+      isRunning: isActive && proc?.status !== 'stopping',
+      usedMemoryMb: stats.memoryMb,
+      usedCpuPercent: stats.cpuPercent,
+    };
+  });
 
   const totalCpuPercent = Math.max(100, cpuCores * 100);
-  const activeExtraReservedMb = Math.max(0, activeAllocatedMemoryMb - Math.round(activeUsedRssMb));
-  const availableMemoryMb = Math.max(
-    0,
-    Math.min(totalMemMb - activeAllocatedMemoryMb, freeMemMb - activeExtraReservedMb)
+  const quotaSummary = computePanelQuotaSummary(
+    quotaSamples,
+    totalMemMb,
+    freeMemMb,
+    totalCpuPercent
   );
-  const availableCpuPercent = Math.max(0, totalCpuPercent - activeAllocatedCpuPercent);
 
   const arch = os.arch();
 
@@ -1214,16 +1713,20 @@ export function getHostVpsInfo(): HostVpsInfo {
     diskTotalGb: disk.diskTotalGb,
     diskUsedGb: disk.diskUsedGb,
     diskFreeGb: disk.diskFreeGb,
-    allocatedMemoryMb: activeAllocatedMemoryMb,
-    allocatedCpuPercent: activeAllocatedCpuPercent,
-    availableMemoryMb,
-    availableCpuPercent,
+    allocatedMemoryMb: quotaSummary.allocatedMemoryMb,
+    allocatedCpuPercent: quotaSummary.allocatedCpuPercent,
+    totalAllocatedMemoryMb: quotaSummary.totalAllocatedMemoryMb,
+    totalAllocatedCpuPercent: quotaSummary.totalAllocatedCpuPercent,
+    panelMemoryUsedMb: quotaSummary.panelMemoryUsedMb,
+    panelCpuPercent: quotaSummary.panelCpuPercent,
+    availableMemoryMb: quotaSummary.availableMemoryMb,
+    availableCpuPercent: quotaSummary.availableCpuPercent,
     uptimeSeconds: Math.floor(os.uptime()),
     nodeVersion: process.version,
     npmVersion: versions.npmVersion,
     pythonVersion: versions.pythonVersion,
     pipVersion: versions.pipVersion,
-    activeServersCount: activeCount,
-    totalServersCount: allServers.length,
+    activeServersCount: quotaSummary.activeServersCount,
+    totalServersCount: quotaSummary.totalServersCount,
   };
 }

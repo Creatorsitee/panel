@@ -14,7 +14,6 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  ResponsiveContainer,
   XAxis,
   YAxis,
 } from 'recharts';
@@ -39,9 +38,41 @@ interface ServerConsoleTabProps {
 }
 
 interface MetricSample {
+  idx: number;
   time: string;
   cpu: number;
   ram: number;
+}
+
+function useMeasuredChartWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 420): number {
+  const [width, setWidth] = useState(fallback);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const updateWidth = () => {
+      const next = Math.floor(el.getBoundingClientRect().width);
+      if (next > 40) {
+        setWidth(next);
+      }
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        updateWidth();
+      });
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, [ref]);
+
+  return width;
 }
 
 function formatDuration(totalSec: number): string {
@@ -81,8 +112,8 @@ function renderHighlightedLogText(text: string, defaultClass = ''): React.ReactN
   return (
     <>
       {tokens.map((tok, idx) =>
-        tok.className ? (
-          <span key={idx} className={tok.className}>
+        tok.className || tok.style ? (
+          <span key={idx} className={tok.className || undefined} style={tok.style}>
             {tok.text}
           </span>
         ) : (
@@ -113,8 +144,10 @@ export default function ServerConsoleTab({
   const [logs, setLogs] = useState<ConsoleLine[]>([]);
   const [streamMetrics, setStreamMetrics] = useState<ServerRuntimeMetrics | null>(null);
   const metrics = streamMetrics ?? server.metrics;
+  const sampleIndexRef = useRef(1);
   const [metricsHistory, setMetricsHistory] = useState<MetricSample[]>(() => [
     {
+      idx: 0,
       time: formatTimeLabel(),
       cpu: Number(server.metrics.cpuPercent.toFixed(2)),
       ram: Number(server.metrics.memoryMb.toFixed(1)),
@@ -130,6 +163,10 @@ export default function ServerConsoleTab({
   const [autoScroll, setAutoScroll] = useState(true);
   const terminalRef = useRef<HTMLDivElement>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
+  const cpuChartWrapRef = useRef<HTMLDivElement>(null);
+  const ramChartWrapRef = useRef<HTMLDivElement>(null);
+  const cpuChartWidth = useMeasuredChartWidth(cpuChartWrapRef);
+  const ramChartWidth = useMeasuredChartWidth(ramChartWrapRef);
   const draftCommandRef = useRef('');
   const onMetricsRef = useRef(onMetricsUpdate);
   const lastStreamMetricsAtRef = useRef<number>(0);
@@ -139,10 +176,13 @@ export default function ServerConsoleTab({
   }, [onMetricsUpdate]);
 
   const appendMetricSample = (nextMetrics: ServerRuntimeMetrics) => {
+    const nextIdx = sampleIndexRef.current;
+    sampleIndexRef.current += 1;
     const sample: MetricSample = {
+      idx: nextIdx,
       time: formatTimeLabel(),
-      cpu: Number(nextMetrics.cpuPercent.toFixed(2)),
-      ram: Number(nextMetrics.memoryMb.toFixed(1)),
+      cpu: Number((Number.isFinite(nextMetrics.cpuPercent) ? nextMetrics.cpuPercent : 0).toFixed(2)),
+      ram: Number((Number.isFinite(nextMetrics.memoryMb) ? nextMetrics.memoryMb : 0).toFixed(1)),
     };
     setMetricsHistory((prev) => [...prev.slice(-29), sample]);
   };
@@ -197,10 +237,10 @@ export default function ServerConsoleTab({
       },
     });
 
-    // Safety fallback only if SSE stream stops delivering frames
+    // Safety fallback if SSE pauses or delays delivering frames
     const fallbackTimer = setInterval(async () => {
       if (!active) return;
-      if (Date.now() - lastStreamMetricsAtRef.current < 3000) return;
+      if (Date.now() - lastStreamMetricsAtRef.current < 1200) return;
       try {
         const res = await apiFetch<{ server: ServerWithMetrics }>(`/api/servers/${server.id}`);
         if (!active || !res.server?.metrics) return;
@@ -210,7 +250,7 @@ export default function ServerConsoleTab({
       } catch {
         // ignore transient poll errors
       }
-    }, 2000);
+    }, 1000);
 
     return () => {
       active = false;
@@ -225,9 +265,10 @@ export default function ServerConsoleTab({
     }
   }, [logs, autoScroll]);
 
-  const powerPerms = getConsolePowerPermissions(metrics.status);
+  const powerPerms = getConsolePowerPermissions(metrics.status, metrics.awaitingInput);
   const statusDisplayLabel = getStatusDisplayLabel(metrics.status);
   const canSendInput = powerPerms.canSendInput;
+  const commandPlaceholder = 'Type a command...';
 
   useEffect(() => {
     if (canSendInput) {
@@ -271,6 +312,17 @@ export default function ServerConsoleTab({
     action: 'start' | 'stop' | 'restart' | 'kill'
   ) {
     setPowerLoading(action);
+    if (action === 'start' || action === 'restart') {
+      const optimisticStarting: ServerRuntimeMetrics = {
+        ...metrics,
+        status: 'starting',
+        uptimeSeconds: 0,
+        awaitingInput: false,
+      };
+      setStreamMetrics(optimisticStarting);
+      appendMetricSample(optimisticStarting);
+      onMetricsRef.current(optimisticStarting);
+    }
     try {
       const res = await apiFetch<{ metrics: ServerRuntimeMetrics }>(
         `/api/servers/${server.id}/power`,
@@ -400,15 +452,18 @@ export default function ServerConsoleTab({
 
   const chartData = useMemo(() => {
     if (metricsHistory.length === 1) {
-      return [metricsHistory[0], { ...metricsHistory[0] }];
+      return [
+        metricsHistory[0],
+        { ...metricsHistory[0], idx: metricsHistory[0].idx + 1 },
+      ];
     }
     return metricsHistory;
   }, [metricsHistory]);
 
   const cpuChartMax = useMemo(() => {
     const peak = Math.max(
-      ...chartData.map((d) => d.cpu),
-      metrics.cpuPercent,
+      ...chartData.map((d) => (Number.isFinite(d.cpu) ? d.cpu : 0)),
+      Number.isFinite(metrics.cpuPercent) ? metrics.cpuPercent : 0,
       0
     );
     if (peak <= 0) return 1;
@@ -416,19 +471,29 @@ export default function ServerConsoleTab({
     return Number((peak * 1.25).toFixed(2));
   }, [chartData, metrics.cpuPercent]);
 
+  const cpuChartTicks = useMemo(
+    () => Array.from(new Set([0, Number((cpuChartMax / 2).toFixed(2)), cpuChartMax])).sort((a, b) => a - b),
+    [cpuChartMax]
+  );
+
   const ramChartMax = useMemo(() => {
     const peak = Math.max(
-      ...chartData.map((d) => d.ram),
-      metrics.memoryMb,
+      ...chartData.map((d) => (Number.isFinite(d.ram) ? d.ram : 0)),
+      Number.isFinite(metrics.memoryMb) ? metrics.memoryMb : 0,
       0
     );
-    if (peak <= 0) return Math.max(1, server.memoryLimitMb);
+    if (peak <= 0) return Math.max(2, server.memoryLimitMb);
     const padded = Math.ceil(peak * 1.2);
     if (peak <= server.memoryLimitMb) {
-      return Math.min(server.memoryLimitMb, Math.max(32, padded));
+      return Math.max(2, Math.min(server.memoryLimitMb, Math.max(32, padded)));
     }
-    return padded;
+    return Math.max(2, padded);
   }, [chartData, metrics.memoryMb, server.memoryLimitMb]);
+
+  const ramChartTicks = useMemo(
+    () => Array.from(new Set([0, Math.round(ramChartMax / 2), ramChartMax])).sort((a, b) => a - b),
+    [ramChartMax]
+  );
 
   function handleTerminalScroll() {
     const el = terminalRef.current;
@@ -552,17 +617,19 @@ export default function ServerConsoleTab({
                   return (
                     <div key={line.id} className="break-words">
                       <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
-                      <span className={isCrashBanner ? 'text-red-400 font-medium' : 'text-zinc-300'}>
-                        {line.text}
-                      </span>
+                      {isCrashBanner ? (
+                        <span className="text-red-400 font-medium">{line.text}</span>
+                      ) : (
+                        renderHighlightedLogText(line.text, 'text-zinc-300')
+                      )}
                     </div>
                   );
                 }
                 if (line.stream === 'stdin') {
                   return (
-                    <div key={line.id} className="break-words text-zinc-400">
-                      <span className="select-none text-zinc-500 mr-1.5">&gt;</span>
-                      <span className="text-zinc-300">{line.text.replace(/^>\s*/, '')}</span>
+                    <div key={line.id} className="break-words text-zinc-300">
+                      <span className="select-none text-emerald-400 font-semibold mr-1.5">&gt;</span>
+                      {renderHighlightedLogText(line.text.replace(/^>\s*/, ''), 'text-zinc-200')}
                     </div>
                   );
                 }
@@ -640,7 +707,7 @@ export default function ServerConsoleTab({
               draftCommandRef.current = e.target.value;
             }}
             onKeyDown={handleCommandKeyDown}
-            placeholder="Type a command..."
+            placeholder={commandPlaceholder}
             className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:cursor-not-allowed"
           />
         </form>
@@ -700,58 +767,56 @@ export default function ServerConsoleTab({
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
               CPU Load
             </h3>
-            <div className="h-[176px] w-full min-w-0 pointer-events-none select-none">
-              <ResponsiveContainer
-                width="100%"
+            <div
+              ref={cpuChartWrapRef}
+              className="h-[176px] w-full min-w-0 overflow-hidden pointer-events-none select-none"
+            >
+              <AreaChart
+                width={cpuChartWidth}
                 height={176}
-                minWidth={0}
-                initialDimension={{ width: 420, height: 176 }}
+                data={chartData}
+                accessibilityLayer={false}
+                margin={{ top: 10, right: 8, left: -4, bottom: 6 }}
               >
-                <AreaChart
-                  data={chartData}
-                  accessibilityLayer={false}
-                  margin={{ top: 10, right: 8, left: -4, bottom: 6 }}
-                >
-                  <defs>
-                    <linearGradient
-                      id={`cpuGrad-${server.id}`}
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
-                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    stroke="currentColor"
-                    className="text-zinc-200 dark:text-zinc-800"
-                    strokeDasharray="3 3"
-                    vertical={false}
-                  />
-                  <XAxis dataKey="time" hide />
-                  <YAxis
-                    domain={[0, cpuChartMax]}
-                    ticks={[0, Number((cpuChartMax / 2).toFixed(2)), cpuChartMax]}
-                    axisLine={false}
-                    tickLine={false}
-                    width={56}
-                    tick={{ fill: '#71717a', fontSize: 11 }}
-                    tickFormatter={(val: number) => `${val.toFixed(2)}%`}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="cpu"
-                    stroke="#06b6d4"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={false}
-                    fill={`url(#cpuGrad-${server.id})`}
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+                <defs>
+                  <linearGradient
+                    id={`cpuGrad-${server.id}`}
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  stroke="currentColor"
+                  className="text-zinc-200 dark:text-zinc-800"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+                <XAxis dataKey="idx" type="number" domain={['dataMin', 'dataMax']} hide />
+                <YAxis
+                  domain={[0, cpuChartMax]}
+                  ticks={cpuChartTicks}
+                  axisLine={false}
+                  tickLine={false}
+                  width={56}
+                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  tickFormatter={(val: number) => `${val.toFixed(2)}%`}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cpu"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={false}
+                  fill={`url(#cpuGrad-${server.id})`}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
             </div>
           </div>
 
@@ -760,58 +825,56 @@ export default function ServerConsoleTab({
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
               Memory
             </h3>
-            <div className="h-[176px] w-full min-w-0 pointer-events-none select-none">
-              <ResponsiveContainer
-                width="100%"
+            <div
+              ref={ramChartWrapRef}
+              className="h-[176px] w-full min-w-0 overflow-hidden pointer-events-none select-none"
+            >
+              <AreaChart
+                width={ramChartWidth}
                 height={176}
-                minWidth={0}
-                initialDimension={{ width: 420, height: 176 }}
+                data={chartData}
+                accessibilityLayer={false}
+                margin={{ top: 10, right: 8, left: -4, bottom: 6 }}
               >
-                <AreaChart
-                  data={chartData}
-                  accessibilityLayer={false}
-                  margin={{ top: 10, right: 8, left: -4, bottom: 6 }}
-                >
-                  <defs>
-                    <linearGradient
-                      id={`ramGrad-${server.id}`}
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
-                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    stroke="currentColor"
-                    className="text-zinc-200 dark:text-zinc-800"
-                    strokeDasharray="3 3"
-                    vertical={false}
-                  />
-                  <XAxis dataKey="time" hide />
-                  <YAxis
-                    domain={[0, ramChartMax]}
-                    ticks={[0, Math.round(ramChartMax / 2), ramChartMax]}
-                    axisLine={false}
-                    tickLine={false}
-                    width={58}
-                    tick={{ fill: '#71717a', fontSize: 11 }}
-                    tickFormatter={(val: number) => `${Math.round(val)}MiB`}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="ram"
-                    stroke="#06b6d4"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={false}
-                    fill={`url(#ramGrad-${server.id})`}
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+                <defs>
+                  <linearGradient
+                    id={`ramGrad-${server.id}`}
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.34} />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.03} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  stroke="currentColor"
+                  className="text-zinc-200 dark:text-zinc-800"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+                <XAxis dataKey="idx" type="number" domain={['dataMin', 'dataMax']} hide />
+                <YAxis
+                  domain={[0, ramChartMax]}
+                  ticks={ramChartTicks}
+                  axisLine={false}
+                  tickLine={false}
+                  width={58}
+                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  tickFormatter={(val: number) => `${Math.round(val)}MiB`}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="ram"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={false}
+                  fill={`url(#ramGrad-${server.id})`}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
             </div>
           </div>
         </div>

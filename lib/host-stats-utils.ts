@@ -82,3 +82,77 @@ export function computeCpuPercentDelta(
   const busy = Math.max(0, deltaTotal - Math.max(0, deltaIdle));
   return Number(Math.min(100, (busy / deltaTotal) * 100).toFixed(1));
 }
+
+export interface ServerQuotaSample {
+  memoryLimitMb: number;
+  cpuLimitPercent: number;
+  isActive: boolean;
+  isRunning: boolean;
+  usedMemoryMb: number;
+  usedCpuPercent: number;
+}
+
+export interface PanelQuotaSummary {
+  activeServersCount: number;
+  totalServersCount: number;
+  allocatedMemoryMb: number;
+  allocatedCpuPercent: number;
+  totalAllocatedMemoryMb: number;
+  totalAllocatedCpuPercent: number;
+  panelMemoryUsedMb: number;
+  panelCpuPercent: number;
+  availableMemoryMb: number;
+  availableCpuPercent: number;
+}
+
+export function computePanelQuotaSummary(
+  servers: ServerQuotaSample[],
+  totalMemMb: number,
+  freeMemMb: number,
+  totalCpuPercent: number
+): PanelQuotaSummary {
+  let activeServersCount = 0;
+  let allocatedMemoryMb = 0;
+  let allocatedCpuPercent = 0;
+  let totalAllocatedMemoryMb = 0;
+  let totalAllocatedCpuPercent = 0;
+  let panelMemoryUsedMb = 0;
+  let panelCpuPercent = 0;
+
+  for (const srv of servers) {
+    const memLimit = Number.isFinite(srv.memoryLimitMb) ? Math.max(0, srv.memoryLimitMb) : 0;
+    const cpuLimit = Number.isFinite(srv.cpuLimitPercent) ? Math.max(0, srv.cpuLimitPercent) : 0;
+    totalAllocatedMemoryMb += memLimit;
+    totalAllocatedCpuPercent += cpuLimit;
+
+    if (srv.isActive) {
+      if (srv.isRunning) {
+        activeServersCount += 1;
+      }
+      allocatedMemoryMb += memLimit;
+      allocatedCpuPercent += cpuLimit;
+      panelMemoryUsedMb += Number.isFinite(srv.usedMemoryMb) ? Math.max(0, srv.usedMemoryMb) : 0;
+      panelCpuPercent += Number.isFinite(srv.usedCpuPercent) ? Math.max(0, srv.usedCpuPercent) : 0;
+    }
+  }
+
+  const activeExtraReservedMb = Math.max(0, allocatedMemoryMb - Math.round(panelMemoryUsedMb));
+  const availableMemoryMb = Math.max(
+    0,
+    Math.min(totalMemMb - allocatedMemoryMb, freeMemMb - activeExtraReservedMb)
+  );
+  const availableCpuPercent = Math.max(0, totalCpuPercent - allocatedCpuPercent);
+
+  return {
+    activeServersCount,
+    totalServersCount: servers.length,
+    allocatedMemoryMb,
+    allocatedCpuPercent,
+    totalAllocatedMemoryMb,
+    totalAllocatedCpuPercent,
+    panelMemoryUsedMb: Number(panelMemoryUsedMb.toFixed(1)),
+    panelCpuPercent: Number(panelCpuPercent.toFixed(2)),
+    availableMemoryMb,
+    availableCpuPercent,
+  };
+}

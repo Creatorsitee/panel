@@ -102,7 +102,6 @@ export function DashboardContentSkeleton() {
   return (
     <div className="space-y-6" role="status" aria-label="Memuat dashboard server">
       <span className="sr-only">Memuat dashboard server...</span>
-      <HostStatsSkeleton />
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3" aria-hidden="true">
         <ShimmerBlock className="h-9 w-full sm:max-w-sm rounded" />
@@ -110,6 +109,19 @@ export function DashboardContentSkeleton() {
       </div>
 
       <ServerCardsSkeleton count={3} />
+    </div>
+  );
+}
+
+export function HostRouteSkeleton() {
+  return (
+    <div className="space-y-6 pb-12" role="status" aria-label="Memuat resource host">
+      <span className="sr-only">Memuat resource host...</span>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800" aria-hidden="true">
+        <ShimmerBlock className="h-6 w-48" />
+        <ShimmerBlock className="h-3.5 w-52" />
+      </div>
+      <HostStatsSkeleton />
     </div>
   );
 }
@@ -425,7 +437,7 @@ export function WorkspaceBootSkeleton({
   serverTab = 'console',
   adminSection = 'users',
 }: {
-  routeKind?: 'dashboard' | 'server' | 'admin';
+  routeKind?: 'dashboard' | 'server' | 'admin' | 'host';
   serverTab?: 'console' | 'files' | 'settings';
   adminSection?: 'users' | 'servers';
 }) {
@@ -499,6 +511,8 @@ export function WorkspaceBootSkeleton({
             <ServerWorkspaceSkeleton tab={serverTab} />
           ) : routeKind === 'admin' ? (
             <AdminRouteSkeleton section={adminSection} />
+          ) : routeKind === 'host' ? (
+            <HostRouteSkeleton />
           ) : (
             <DashboardContentSkeleton />
           )}

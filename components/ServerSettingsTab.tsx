@@ -3,16 +3,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2, Terminal, ShieldAlert } from 'lucide-react';
 import { apiFetch } from './api-client';
-import { showConfirmDialog, showErrorAlert, showSuccessToast } from '@/lib/swal';
+import { showConfirmDialog, showErrorAlert } from '@/lib/swal';
 import {
-  getVpsCpuOptions,
-  getVpsMemoryOptions,
+  getHostCpuOptions,
+  getHostMemoryOptions,
 } from '@/lib/vps-specs';
-import type { HostVpsInfo, ServerWithMetrics } from '@/lib/types';
+import type { HostInfo, ServerWithMetrics } from '@/lib/types';
 
 interface ServerSettingsTabProps {
   server: ServerWithMetrics;
-  hostInfo: HostVpsInfo | null;
+  hostInfo: HostInfo | null;
   isAdmin: boolean;
   onUpdated: (server: ServerWithMetrics) => void;
   onDeleted: (serverId: string) => void;
@@ -34,6 +34,7 @@ export default function ServerSettingsTab({
   const [cpuLimitPercent, setCpuLimitPercent] = useState(server.cpuLimitPercent);
 
   const [deleting, setDeleting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const lastSavedRef = useRef({
     name: server.name,
@@ -51,7 +52,7 @@ export default function ServerSettingsTab({
     server.metrics.status === 'installing';
 
   const memoryOptions = useMemo(() => {
-    const opts = getVpsMemoryOptions(hostInfo, isServerActive ? server.memoryLimitMb : 0);
+    const opts = getHostMemoryOptions(hostInfo, isServerActive ? server.memoryLimitMb : 0);
     if (!opts.some((o) => o.value === server.memoryLimitMb)) {
       return [
         ...opts,
@@ -68,7 +69,7 @@ export default function ServerSettingsTab({
   }, [hostInfo, isServerActive, server.memoryLimitMb]);
 
   const cpuOptions = useMemo(() => {
-    const opts = getVpsCpuOptions(hostInfo, isServerActive ? server.cpuLimitPercent : 0);
+    const opts = getHostCpuOptions(hostInfo, isServerActive ? server.cpuLimitPercent : 0);
     if (!opts.some((o) => o.value === server.cpuLimitPercent)) {
       const cores = Number((server.cpuLimitPercent / 100).toFixed(2));
       return [
@@ -144,15 +145,12 @@ export default function ServerSettingsTab({
           memoryLimitMb: res.server.memoryLimitMb,
           cpuLimitPercent: res.server.cpuLimitPercent,
         };
+        setSaveError(null);
         onUpdatedRef.current(res.server);
-        void showSuccessToast('Pengaturan tersimpan');
       } catch (err) {
-        await showErrorAlert(
-          'Gagal Menyimpan Perubahan',
-          err instanceof Error ? err.message : 'Gagal menyimpan perubahan.'
-        );
+        setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan perubahan.');
       }
-    }, 600);
+    }, 800);
 
     return () => clearTimeout(timer);
   }, [name, description, startupCommand, autoRestart, isAdmin, trimmedPort, parsedPort, portError, memoryLimitMb, cpuLimitPercent, server.id]);
@@ -170,7 +168,6 @@ export default function ServerSettingsTab({
     setDeleting(true);
     try {
       await apiFetch(`/api/servers/${server.id}`, { method: 'DELETE' });
-      void showSuccessToast('Server dihapus', server.name);
       onDeleted(server.id);
     } catch (err) {
       await showErrorAlert(
@@ -207,10 +204,18 @@ export default function ServerSettingsTab({
               type="text"
               required
               value={startupCommand}
-              onChange={(e) => setStartupCommand(e.target.value)}
+              onChange={(e) => {
+                setStartupCommand(e.target.value);
+                if (saveError) setSaveError(null);
+              }}
               placeholder={server.runtime === 'nodejs' ? 'node index.js' : 'python3 -u main.py'}
               className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
             />
+            {saveError && (
+              <p className="text-[11px] text-red-500" role="status">
+                {saveError}
+              </p>
+            )}
           </div>
 
           <label className="flex items-center gap-2.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer pt-1">
@@ -241,7 +246,10 @@ export default function ServerSettingsTab({
                 type="text"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (saveError) setSaveError(null);
+                }}
                 className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
               />
             </div>
@@ -254,7 +262,10 @@ export default function ServerSettingsTab({
                 id="srv-desc"
                 type="text"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => {
+                  setDescription(e.target.value);
+                  if (saveError) setSaveError(null);
+                }}
                 placeholder="Deskripsi singkat"
                 className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
               />

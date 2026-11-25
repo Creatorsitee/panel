@@ -6,6 +6,7 @@ import {
 } from './console-state.ts';
 import {
   computeCpuPercentDelta,
+  computePanelQuotaSummary,
   parseMeminfoSwapMb,
   parseOsPrettyName,
   parseProcStatCpuSnapshot,
@@ -35,7 +36,7 @@ test('getConsolePowerPermissions enforces Pterodactyl power button rules per sta
     canRestart: false,
     canStop: true,
     canKill: true,
-    canSendInput: true,
+    canSendInput: false,
     isBusy: true,
   });
 
@@ -44,11 +45,29 @@ test('getConsolePowerPermissions enforces Pterodactyl power button rules per sta
     canRestart: true,
     canStop: true,
     canKill: true,
+    canSendInput: false,
+    isBusy: false,
+  });
+
+  assert.deepEqual(getConsolePowerPermissions('running', true), {
+    canStart: false,
+    canRestart: true,
+    canStop: true,
+    canKill: true,
     canSendInput: true,
     isBusy: false,
   });
 
-  assert.deepEqual(getConsolePowerPermissions('stopping'), {
+  assert.deepEqual(getConsolePowerPermissions('starting', true), {
+    canStart: false,
+    canRestart: false,
+    canStop: true,
+    canKill: true,
+    canSendInput: true,
+    isBusy: true,
+  });
+
+  assert.deepEqual(getConsolePowerPermissions('stopping', true), {
     canStart: false,
     canRestart: false,
     canStop: false,
@@ -84,4 +103,43 @@ test('host-stats-utils parses /etc/os-release, /proc/meminfo swap, and /proc/sta
   assert.deepEqual(s1, { idle: 850, total: 1000 });
   assert.equal(computeCpuPercentDelta(s1, s2), 15);
   assert.equal(computeCpuPercentDelta(null, s2), null);
+});
+
+test('computePanelQuotaSummary accurately separates active quota, registered quota, and live usage', () => {
+  const summary = computePanelQuotaSummary(
+    [
+      {
+        memoryLimitMb: 512,
+        cpuLimitPercent: 25,
+        isActive: true,
+        isRunning: true,
+        usedMemoryMb: 48.4,
+        usedCpuPercent: 2.34,
+      },
+      {
+        memoryLimitMb: 1024,
+        cpuLimitPercent: 50,
+        isActive: false,
+        isRunning: false,
+        usedMemoryMb: 0,
+        usedCpuPercent: 0,
+      },
+    ],
+    12288,
+    10655,
+    400
+  );
+
+  assert.deepEqual(summary, {
+    activeServersCount: 1,
+    totalServersCount: 2,
+    allocatedMemoryMb: 512,
+    allocatedCpuPercent: 25,
+    totalAllocatedMemoryMb: 1536,
+    totalAllocatedCpuPercent: 75,
+    panelMemoryUsedMb: 48.4,
+    panelCpuPercent: 2.34,
+    availableMemoryMb: 10191,
+    availableCpuPercent: 375,
+  });
 });

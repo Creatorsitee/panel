@@ -40,7 +40,7 @@ import {
 import type {
   AdminServerSummary,
   AdminUserSummary,
-  HostVpsInfo,
+  HostInfo,
   PublicUser,
   UserRole,
 } from '@/lib/types';
@@ -72,7 +72,7 @@ export default function AdminPanelTab({
 }: AdminPanelTabProps) {
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [servers, setServers] = useState<AdminServerSummary[]>([]);
-  const [hostInfo, setHostInfo] = useState<HostVpsInfo | null>(null);
+  const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [userSearch, setUserSearch] = useState('');
@@ -112,7 +112,7 @@ export default function AdminPanelTab({
       try {
         const [usersRes, serversRes] = await Promise.all([
           apiFetch<{ users: AdminUserSummary[] }>('/api/admin/users'),
-          apiFetch<{ servers: AdminServerSummary[]; host: HostVpsInfo }>('/api/admin/servers'),
+          apiFetch<{ servers: AdminServerSummary[]; host: HostInfo }>('/api/admin/servers'),
         ]);
         setUsers(usersRes.users);
         setServers(serversRes.servers);
@@ -152,7 +152,7 @@ export default function AdminPanelTab({
           const data = payload as {
             users?: AdminUserSummary[];
             servers?: AdminServerSummary[];
-            host?: HostVpsInfo;
+            host?: HostInfo;
           };
           if (Array.isArray(data.users)) {
             setUsers(data.users);

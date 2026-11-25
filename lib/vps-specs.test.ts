@@ -9,10 +9,10 @@ import {
   getDefaultMemoryMb,
   getEffectiveMinCpuPercent,
   getEffectiveMinMemoryMb,
+  getHostCpuOptions,
+  getHostMemoryOptions,
   getPerServerMaxCpuPercent,
   getPerServerMaxMemoryMb,
-  getVpsCpuOptions,
-  getVpsMemoryOptions,
 } from './vps-specs.ts';
 
 test('formatCpuLabel and formatMemoryLabel format fractional and gigabyte values cleanly', () => {
@@ -26,7 +26,7 @@ test('formatCpuLabel and formatMemoryLabel format fractional and gigabyte values
   assert.equal(formatMemoryLabel(1536), '1536 MB (1.5 GB)');
 });
 
-test('standard VPS keeps 512/768 MB and 10/15/25% options and defaults to smallest option (512 MB and 10%)', () => {
+test('standard host keeps 512/768 MB and 10/15/25% options and defaults to smallest option (512 MB and 10%)', () => {
   const host = {
     totalMemoryMb: 12288,
     availableMemoryMb: 8192,
@@ -39,8 +39,8 @@ test('standard VPS keeps 512/768 MB and 10/15/25% options and defaults to smalle
   assert.equal(getEffectiveMinMemoryMb(4096), 512);
   assert.equal(getEffectiveMinCpuPercent(100), 10);
 
-  const memOpts = getVpsMemoryOptions(host, 0);
-  const cpuOpts = getVpsCpuOptions(host, 0);
+  const memOpts = getHostMemoryOptions(host, 0);
+  const cpuOpts = getHostCpuOptions(host, 0);
 
   assert.deepEqual(
     memOpts.map((o) => o.value),
@@ -54,29 +54,29 @@ test('standard VPS keeps 512/768 MB and 10/15/25% options and defaults to smalle
   assert.equal(getDefaultCpuPercent(host), 10);
 });
 
-test('1 GB / 1 Core and 1.5 GB / 1 Core VPS keep smaller options, surface 1 GB / 50%, and default to smallest', () => {
-  const vps1Gb = {
+test('1 GB / 1 Core and 1.5 GB / 1 Core host keep smaller options, surface 1 GB / 50%, and default to smallest', () => {
+  const host1Gb = {
     totalMemoryMb: 1024,
     availableMemoryMb: 1024,
     cpuCores: 1,
     availableCpuPercent: 100,
   };
 
-  assert.equal(getPerServerMaxMemoryMb(vps1Gb), 1024);
-  assert.equal(getPerServerMaxCpuPercent(vps1Gb), 50);
+  assert.equal(getPerServerMaxMemoryMb(host1Gb), 1024);
+  assert.equal(getPerServerMaxCpuPercent(host1Gb), 50);
 
   assert.deepEqual(
-    getVpsMemoryOptions(vps1Gb, 0).map((o) => o.value),
+    getHostMemoryOptions(host1Gb, 0).map((o) => o.value),
     [512, 768, 1024]
   );
   assert.deepEqual(
-    getVpsCpuOptions(vps1Gb, 0).map((o) => o.value),
+    getHostCpuOptions(host1Gb, 0).map((o) => o.value),
     [10, 15, 25, 50]
   );
-  assert.equal(getDefaultMemoryMb(vps1Gb), 512);
-  assert.equal(getDefaultCpuPercent(vps1Gb), 10);
+  assert.equal(getDefaultMemoryMb(host1Gb), 512);
+  assert.equal(getDefaultCpuPercent(host1Gb), 10);
 
-  const vps15Gb = {
+  const host15Gb = {
     totalMemoryMb: 1536,
     availableMemoryMb: 1536,
     cpuCores: 1,
@@ -84,14 +84,14 @@ test('1 GB / 1 Core and 1.5 GB / 1 Core VPS keep smaller options, surface 1 GB /
   };
 
   assert.deepEqual(
-    getVpsMemoryOptions(vps15Gb, 0).map((o) => o.value),
+    getHostMemoryOptions(host15Gb, 0).map((o) => o.value),
     [512, 768, 1024]
   );
-  assert.equal(getDefaultMemoryMb(vps15Gb), 512);
+  assert.equal(getDefaultMemoryMb(host15Gb), 512);
 });
 
-test('small or partially utilized VPS falls back cleanly below 1 GB / 50% and defaults to smallest option', () => {
-  const constrainedVps = {
+test('small or partially utilized host falls back cleanly below 1 GB / 50% and defaults to smallest option', () => {
+  const constrainedHost = {
     totalMemoryMb: 1024,
     availableMemoryMb: 768,
     cpuCores: 1,
@@ -99,15 +99,15 @@ test('small or partially utilized VPS falls back cleanly below 1 GB / 50% and de
   };
 
   assert.deepEqual(
-    getVpsMemoryOptions(constrainedVps, 0).map((o) => o.value),
+    getHostMemoryOptions(constrainedHost, 0).map((o) => o.value),
     [512, 768]
   );
   assert.deepEqual(
-    getVpsCpuOptions(constrainedVps, 0).map((o) => o.value),
+    getHostCpuOptions(constrainedHost, 0).map((o) => o.value),
     [10, 15, 25]
   );
-  assert.equal(getDefaultMemoryMb(constrainedVps), 512);
-  assert.equal(getDefaultCpuPercent(constrainedVps), 10);
+  assert.equal(getDefaultMemoryMb(constrainedHost), 512);
+  assert.equal(getDefaultCpuPercent(constrainedHost), 10);
 });
 
 test('resource options return empty when capacity is exhausted and preserve current allocation when editing', () => {
@@ -120,19 +120,19 @@ test('resource options return empty when capacity is exhausted and preserve curr
 
   assert.equal(getAvailableMemoryMb(fullHost, 0), 0);
   assert.equal(getAvailableCpuPercent(fullHost, 0), 0);
-  assert.equal(getVpsMemoryOptions(fullHost, 0).length, 0);
-  assert.equal(getVpsCpuOptions(fullHost, 0).length, 0);
+  assert.equal(getHostMemoryOptions(fullHost, 0).length, 0);
+  assert.equal(getHostCpuOptions(fullHost, 0).length, 0);
 
   assert.deepEqual(
-    getVpsMemoryOptions(fullHost, 1024).map((o) => o.value),
+    getHostMemoryOptions(fullHost, 1024).map((o) => o.value),
     [512, 768, 1024]
   );
   assert.deepEqual(
-    getVpsCpuOptions(fullHost, 50).map((o) => o.value),
+    getHostCpuOptions(fullHost, 50).map((o) => o.value),
     [10, 15, 25, 50]
   );
   assert.deepEqual(
-    getVpsCpuOptions(fullHost, 10).map((o) => o.value),
+    getHostCpuOptions(fullHost, 10).map((o) => o.value),
     [10]
   );
 });

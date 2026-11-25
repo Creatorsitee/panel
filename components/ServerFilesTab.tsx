@@ -77,6 +77,11 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   const [uploading, setUploading] = useState(false);
 
   const [activeMenuPath, setActiveMenuPath] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+  } | null>(null);
   const [moveModalPath, setMoveModalPath] = useState<string | null>(null);
   const [newDestPath, setNewDestPath] = useState('');
 
@@ -134,18 +139,23 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
 
   useEffect(() => {
     if (!activeMenuPath && !newEntryType && !moveModalPath) return;
-    const handleOutside = () => setActiveMenuPath(null);
+    const closeMenu = () => {
+      setActiveMenuPath(null);
+      setMenuPosition(null);
+    };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setActiveMenuPath(null);
+        closeMenu();
         setNewEntryType(null);
         setMoveModalPath(null);
       }
     };
-    window.addEventListener('click', handleOutside);
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('resize', closeMenu);
     window.addEventListener('keydown', handleKey);
     return () => {
-      window.removeEventListener('click', handleOutside);
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('resize', closeMenu);
       window.removeEventListener('keydown', handleKey);
     };
   }, [activeMenuPath, newEntryType, moveModalPath]);
@@ -191,6 +201,9 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       });
       setSavedContent(fileContent);
       void showSuccessToast('File disimpan', selectedFile);
+      setSelectedFile(null);
+      setFileContent('');
+      setSavedContent('');
       void loadDirectory(currentDir);
     } catch (err) {
       await showErrorAlert(
@@ -373,43 +386,23 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-10">
       {/* File Manager Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
-        <div className="flex items-center gap-2 text-xs font-mono min-w-0 flex-1">
-          <button
-            type="button"
-            disabled={!currentDir}
-            onClick={navigateUp}
-            className="h-7 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 inline-flex items-center gap-1 cursor-pointer shrink-0"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-            <span>Naik</span>
-          </button>
-          <span className="text-zinc-500 font-semibold truncate">/{currentDir}</span>
-        </div>
+      {!selectedFile && (
+        <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:px-3.5 sm:py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 text-xs font-mono min-w-0 flex-1">
+            <button
+              type="button"
+              disabled={!currentDir}
+              onClick={navigateUp}
+              className="h-8 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Naik</span>
+            </button>
+            <span className="text-zinc-500 dark:text-zinc-400 font-semibold truncate">
+              /{currentDir}
+            </span>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setNewEntryType('file');
-              setNewEntryName('');
-            }}
-            className="h-7 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-          >
-            <FilePlus2 className="w-3.5 h-3.5" />
-            <span>File Baru</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setNewEntryType('directory');
-              setNewEntryName('');
-            }}
-            className="h-7 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            <span>Folder Baru</span>
-          </button>
           <input
             ref={uploadInputRef}
             type="file"
@@ -418,17 +411,42 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             className="hidden"
             aria-label="Upload file"
           />
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => uploadInputRef.current?.click()}
-            className="h-7 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{uploading ? 'Upload...' : 'Upload'}</span>
-          </button>
+
+          <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setNewEntryType('file');
+                setNewEntryName('');
+              }}
+              className="h-8 px-2.5 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+            >
+              <FilePlus2 className="w-3.5 h-3.5 shrink-0" />
+              <span>File Baru</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setNewEntryType('directory');
+                setNewEntryName('');
+              }}
+              className="h-8 px-2.5 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+            >
+              <FolderPlus className="w-3.5 h-3.5 shrink-0" />
+              <span>Folder Baru</span>
+            </button>
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => uploadInputRef.current?.click()}
+              className="h-8 px-2.5 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5 shrink-0" />
+              <span>{uploading ? 'Upload...' : 'Upload'}</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {newEntryType && (
         <form
@@ -566,7 +584,15 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
           ) : entries.length === 0 ? (
             <div className="p-8 text-xs text-zinc-500 text-center">Direktori ini masih kosong.</div>
           ) : (
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800/60 overflow-y-auto max-h-[520px]">
+            <div
+              onScroll={() => {
+                if (activeMenuPath) {
+                  setActiveMenuPath(null);
+                  setMenuPosition(null);
+                }
+              }}
+              className="divide-y divide-zinc-100 dark:divide-zinc-800/60 overflow-y-auto max-h-[520px]"
+            >
               {entries.map((entry) => {
                 const isZip = entry.name.toLowerCase().endsWith('.zip');
                 const isDir = entry.type === 'directory';
@@ -599,7 +625,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                       {isDir ? (
                         <Folder className="w-4 h-4 text-amber-500 shrink-0" />
                       ) : isZip ? (
-                        <FileArchive className="w-4 h-4 text-blue-400 shrink-0" />
+                        <FileArchive className="w-4 h-4 text-zinc-700 dark:text-zinc-100 shrink-0" />
                       ) : (
                         <FileCode2 className="w-4 h-4 text-zinc-400 shrink-0" />
                       )}
@@ -638,30 +664,63 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                             type="button"
                             onClick={(ev) => {
                               ev.stopPropagation();
-                              setActiveMenuPath(activeMenuPath === entry.path ? null : entry.path);
+                              if (activeMenuPath === entry.path) {
+                                setActiveMenuPath(null);
+                                setMenuPosition(null);
+                                return;
+                              }
+                              const rect = ev.currentTarget.getBoundingClientRect();
+                              const openUpward =
+                                window.innerHeight - rect.bottom < 96 && rect.top > 96;
+                              setMenuPosition(
+                                openUpward
+                                  ? {
+                                      bottom: window.innerHeight - rect.top + 4,
+                                      right: Math.max(8, window.innerWidth - rect.right),
+                                    }
+                                  : {
+                                      top: rect.bottom + 4,
+                                      right: Math.max(8, window.innerWidth - rect.right),
+                                    }
+                              );
+                              setActiveMenuPath(entry.path);
                             }}
-                            aria-label="Opsi ZIP"
+                            aria-label={`Opsi ZIP ${entry.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={activeMenuPath === entry.path}
                             className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                           >
                             <MoreVertical className="w-4 h-4" />
                           </button>
 
-                          {activeMenuPath === entry.path && (
-                            <div className="absolute right-0 mt-1 w-36 rounded shadow-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 py-1 z-50 text-xs">
+                          {activeMenuPath === entry.path && menuPosition && (
+                            <div
+                              role="menu"
+                              onClick={(ev) => ev.stopPropagation()}
+                              style={{
+                                position: 'fixed',
+                                top: menuPosition.top,
+                                bottom: menuPosition.bottom,
+                                right: menuPosition.right,
+                              }}
+                              className="w-36 rounded shadow-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 py-1 z-50 text-xs"
+                            >
                               <button
                                 type="button"
+                                role="menuitem"
                                 onClick={() => handleExtractZip(entry.path)}
                                 className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
                               >
-                                <FileArchive className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+                                <FileArchive className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-100 shrink-0" />
                                 <span>Ekstrak ZIP</span>
                               </button>
                               <button
                                 type="button"
+                                role="menuitem"
                                 onClick={() => handleDeleteEntry(entry.path)}
                                 className="w-full px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3.5 h-3.5 shrink-0" />
                                 <span>Hapus</span>
                               </button>
                             </div>

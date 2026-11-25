@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listAllServers, listAllUsers } from '@/lib/db';
-import { getHostVpsInfo, getServerMetrics } from '@/lib/process-manager';
+import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
 import { requireAdmin } from '@/lib/route-guard';
 import type { AdminServerSummary } from '@/lib/types';
 
@@ -24,6 +24,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     servers: enriched,
-    host: getHostVpsInfo(),
+    host: getHostInfo(),
   });
 }

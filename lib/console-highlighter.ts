@@ -1,14 +1,22 @@
+import type { CSSProperties } from 'react';
+
 export interface HighlightToken {
   text: string;
   className: string;
+  style?: CSSProperties;
 }
 
 interface AnsiStyle {
   fgClass: string;
+  fgColor: string;
+  bgClass: string;
+  bgColor: string;
   bold: boolean;
   dim: boolean;
   italic: boolean;
   underline: boolean;
+  inverse: boolean;
+  strikethrough: boolean;
 }
 
 const ANSI_FG_MAP: Record<number, string> = {
@@ -30,30 +38,118 @@ const ANSI_FG_MAP: Record<number, string> = {
   97: 'text-white',
 };
 
+const ANSI_BG_MAP: Record<number, string> = {
+  40: 'bg-zinc-900',
+  41: 'bg-red-500/25',
+  42: 'bg-emerald-500/25',
+  43: 'bg-amber-500/25',
+  44: 'bg-sky-500/25',
+  45: 'bg-violet-500/25',
+  46: 'bg-cyan-500/25',
+  47: 'bg-zinc-200/20',
+  100: 'bg-zinc-700/50',
+  101: 'bg-red-500/35',
+  102: 'bg-emerald-500/35',
+  103: 'bg-amber-500/35',
+  104: 'bg-sky-500/35',
+  105: 'bg-violet-500/35',
+  106: 'bg-cyan-500/35',
+  107: 'bg-white/25',
+};
+
+const XTERM_16_HEX = [
+  '#52525b',
+  '#f87171',
+  '#34d399',
+  '#fbbf24',
+  '#38bdf8',
+  '#a78bfa',
+  '#22d3ee',
+  '#e4e4e7',
+  '#71717a',
+  '#fca5a5',
+  '#6ee7b7',
+  '#fcd34d',
+  '#7dd3fc',
+  '#c4b5fd',
+  '#67e8f9',
+  '#ffffff',
+];
+
+function xterm256ToHex(index: number): string {
+  const n = Math.max(0, Math.min(255, Math.floor(index)));
+  if (n < 16) return XTERM_16_HEX[n];
+  if (n < 232) {
+    const idx = n - 16;
+    const rIdx = Math.floor(idx / 36);
+    const gIdx = Math.floor((idx % 36) / 6);
+    const bIdx = idx % 6;
+    const toVal = (v: number) => (v === 0 ? 0 : 55 + v * 40);
+    return `rgb(${toVal(rIdx)}, ${toVal(gIdx)}, ${toVal(bIdx)})`;
+  }
+  const gray = 8 + (n - 232) * 10;
+  return `rgb(${gray}, ${gray}, ${gray})`;
+}
+
 // Strips non-SGR CSI/OSC escape sequences (cursor moves, line clear, window title, etc.)
 const NON_SGR_ESCAPE_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]/g;
-const SGR_RE = /\x1b\[([0-9;]*)m/g;
+const SGR_RE = /\x1b\[([0-9;:]*)m/g;
+
+function normalizeCarriageReturns(raw: string): string {
+  if (!raw.includes('\r')) return raw;
+  const parts = raw.split('\r');
+  let buffer = '';
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.length >= buffer.length) {
+      buffer = part;
+    } else {
+      buffer = part + buffer.slice(part.length);
+    }
+  }
+  return buffer;
+}
 
 function buildAnsiClassName(style: AnsiStyle): string {
   const classes: string[] = [];
-  if (style.fgClass) classes.push(style.fgClass);
+  if (style.inverse) {
+    classes.push('bg-zinc-200 text-zinc-950 px-0.5 rounded-[2px]');
+  } else {
+    if (style.fgClass && !style.fgColor) classes.push(style.fgClass);
+    if (style.bgClass && !style.bgColor) classes.push(style.bgClass);
+  }
   if (style.bold) classes.push('font-semibold');
   if (style.dim) classes.push('opacity-70');
   if (style.italic) classes.push('italic');
   if (style.underline) classes.push('underline underline-offset-2');
+  if (style.strikethrough) classes.push('line-through');
   return classes.join(' ');
 }
 
+function buildAnsiInlineStyle(style: AnsiStyle): CSSProperties | undefined {
+  if (style.inverse) return undefined;
+  const css: CSSProperties = {};
+  if (style.fgColor) css.color = style.fgColor;
+  if (style.bgColor) css.backgroundColor = style.bgColor;
+  return Object.keys(css).length > 0 ? css : undefined;
+}
+
 function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle }> {
-  const cleaned = raw.replace(NON_SGR_ESCAPE_RE, '');
+  const normalized = normalizeCarriageReturns(raw);
+  const cleaned = normalized.replace(NON_SGR_ESCAPE_RE, '');
   const segments: Array<{ text: string; style: AnsiStyle }> = [];
 
   const style: AnsiStyle = {
     fgClass: '',
+    fgColor: '',
+    bgClass: '',
+    bgColor: '',
     bold: false,
     dim: false,
     italic: false,
     underline: false,
+    inverse: false,
+    strikethrough: false,
   };
 
   let lastIndex = 0;
@@ -69,14 +165,27 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
     }
 
     const codesRaw = match[1];
-    const codes = codesRaw === '' ? [0] : codesRaw.split(';').map((n) => Number(n));
-    for (const code of codes) {
+    const codes =
+      codesRaw === ''
+        ? [0]
+        : codesRaw
+            .replace(/::/g, ':0:')
+            .split(/[;:]/)
+            .map((n) => (n === '' ? 0 : Number(n)));
+
+    for (let i = 0; i < codes.length; i += 1) {
+      const code = codes[i];
       if (!Number.isFinite(code) || code === 0) {
         style.fgClass = '';
+        style.fgColor = '';
+        style.bgClass = '';
+        style.bgColor = '';
         style.bold = false;
         style.dim = false;
         style.italic = false;
         style.underline = false;
+        style.inverse = false;
+        style.strikethrough = false;
       } else if (code === 1) {
         style.bold = true;
       } else if (code === 2) {
@@ -85,6 +194,10 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
         style.italic = true;
       } else if (code === 4) {
         style.underline = true;
+      } else if (code === 7) {
+        style.inverse = true;
+      } else if (code === 9) {
+        style.strikethrough = true;
       } else if (code === 22) {
         style.bold = false;
         style.dim = false;
@@ -92,10 +205,49 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
         style.italic = false;
       } else if (code === 24) {
         style.underline = false;
+      } else if (code === 27) {
+        style.inverse = false;
+      } else if (code === 29) {
+        style.strikethrough = false;
       } else if (code === 39) {
         style.fgClass = '';
+        style.fgColor = '';
+      } else if (code === 49) {
+        style.bgClass = '';
+        style.bgColor = '';
+      } else if (code === 38 || code === 48) {
+        const isFg = code === 38;
+        const mode = codes[i + 1];
+        if (mode === 5 && codes[i + 2] !== undefined) {
+          const hex = xterm256ToHex(codes[i + 2]);
+          if (isFg) {
+            style.fgClass = '';
+            style.fgColor = hex;
+          } else {
+            style.bgClass = '';
+            style.bgColor = hex;
+          }
+          i += 2;
+        } else if (mode === 2 && codes[i + 4] !== undefined) {
+          const r = Math.max(0, Math.min(255, Math.floor(codes[i + 2])));
+          const g = Math.max(0, Math.min(255, Math.floor(codes[i + 3])));
+          const b = Math.max(0, Math.min(255, Math.floor(codes[i + 4])));
+          const rgb = `rgb(${r}, ${g}, ${b})`;
+          if (isFg) {
+            style.fgClass = '';
+            style.fgColor = rgb;
+          } else {
+            style.bgClass = '';
+            style.bgColor = rgb;
+          }
+          i += 4;
+        }
       } else if (ANSI_FG_MAP[code]) {
+        style.fgColor = '';
         style.fgClass = ANSI_FG_MAP[code];
+      } else if (ANSI_BG_MAP[code]) {
+        style.bgColor = '';
+        style.bgClass = ANSI_BG_MAP[code];
       }
     }
 
@@ -115,55 +267,118 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
 const SEMANTIC_TOKEN_RE = new RegExp(
   [
     // 1: URLs
-    /(https?:\/\/[^\s"'<>]+|wss?:\/\/[^\s"'<>]+)/.source,
+    /(https?:\/\/[^\s"'<>)\]]+|wss?:\/\/[^\s"'<>)\]]+)/.source,
     // 2: ISO or bracketed timestamps
     /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\])/.source,
     // 3: Critical / Error keywords & runtime exceptions
-    /(\[?(?:FATAL|CRITICAL|ERROR|ERR!)\]?|\b(?:Traceback|AssertionError|TypeError|ReferenceError|SyntaxError|ValueError|KeyError|RuntimeError|ImportError|ModuleNotFoundError|PermissionError|ENOENT|EACCES|EADDRINUSE|ECONNREFUSED|ETIMEDOUT|UnhandledPromiseRejection)\b)/.source,
+    /(\[?(?:FATAL|CRITICAL|ERROR|ERR!|FAILED)\]?|\b(?:Traceback|AssertionError|TypeError|ReferenceError|SyntaxError|ValueError|KeyError|RuntimeError|ImportError|ModuleNotFoundError|PermissionError|OSError|ConnectionError|TimeoutError|ENOENT|EACCES|EADDRINUSE|ECONNREFUSED|ETIMEDOUT|ERR_MODULE_NOT_FOUND|UnhandledPromiseRejection)\b)/.source,
     // 4: Warning keywords
-    /(\[?(?:WARN|WARNING)\]?|\bnpm warn\b)/.source,
+    /(\[?(?:WARN|WARNING)\]?|\bnpm warn\b|\bDeprecationWarning\b)/.source,
     // 5: Success / Ready keywords
-    /(\[(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED)\]|(?<=^|\s)(?:READY|LISTENING|CONNECTED)(?=\s|:|$))/.source,
-    // 6: Info / Notice tags
-    /(\[(?:INFO|NOTICE|DEBUG)\]|\b(?:INFO|NOTICE|DEBUG):|\bnpm notice\b)/.source,
-    // 7: File path with line(:col)
-    /([a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|py|json|ya?ml|env|sh|sql):\d+(?::\d+)?)/.source,
+    /(\[(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED|OK|PASS|PASSED)\]|(?<=^|\s)(?:READY|LISTENING|CONNECTED|ONLINE|PASSED|DONE)(?=\s|:|$))/.source,
+    // 6: Info / Notice badges
+    /(\[(?:INFO|NOTICE)\]|\b(?:INFO|NOTICE):|\bnpm notice\b)/.source,
+    // 7: Debug / Trace badges
+    /(\[(?:DEBUG|TRACE)\]|\b(?:DEBUG|TRACE):)/.source,
     // 8: Structured HTTP request + status (e.g. "GET /api/health 200")
     /(\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/[^\s]*\s+[1-5]\d{2}\b)/.source,
+    // 9: File path with line(:col)
+    /([a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|py|json|ya?ml|env|sh|sql):\d+(?::\d+)?)/.source,
+    // 10: Host/IP with optional port (e.g. localhost:3000, 127.0.0.1:4001, 0.0.0.0:8080)
+    /(\b(?:localhost|(?:\d{1,3}\.){3}\d{1,3})(?::\d{2,5})?\b)/.source,
+    // 11: ENV_KEY=value assignments
+    /(\b[A-Z_][A-Z0-9_]{1,}=(?:[^\s"']+|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))/.source,
+    // 12: JSON object keys ("key":)
+    /("(?:[^"\\]|\\.)*"(?=\s*:))/.source,
+    // 13: Quoted strings
+    /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/.source,
+    // 14: CLI flags (--reload, --port=4001, -u)
+    /((?<=^|\s)--?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\s"']+)?)/.source,
+    // 15: Booleans & null/None/undefined
+    /(\b(?:true|false|null|undefined|None|True|False|NaN|Infinity)\b)/.source,
+    // 16: Numbers & duration/size units
+    /(\b\d+(?:\.\d+)?(?:ms|µs|us|ns|s|m|h|B|KB|MB|GB|KiB|MiB|GiB|%|px)?\b)/.source,
   ].join('|'),
   'g'
 );
 
-function classifySemanticToken(match: RegExpExecArray, defaultClass: string): HighlightToken[] {
+function classifySemanticToken(
+  match: RegExpExecArray,
+  defaultClass: string
+): HighlightToken[] {
   const full = match[0];
 
   if (match[1]) {
-    return [{ text: full, className: 'text-cyan-400 underline decoration-cyan-400/30 underline-offset-2' }];
+    return [{ text: full, className: 'text-cyan-400 underline decoration-cyan-400/35 underline-offset-2' }];
   }
   if (match[2]) return [{ text: full, className: 'text-zinc-500' }];
-  if (match[3]) return [{ text: full, className: 'text-red-400 font-medium' }];
-  if (match[4]) return [{ text: full, className: 'text-amber-400 font-medium' }];
-  if (match[5]) return [{ text: full, className: 'text-emerald-400 font-medium' }];
-  if (match[6]) return [{ text: full, className: 'text-zinc-400 font-medium' }];
-  if (match[7]) {
-    return [{ text: full, className: 'text-zinc-400 underline decoration-zinc-600/70 underline-offset-2' }];
-  }
+  if (match[3]) return [{ text: full, className: 'text-red-400 font-semibold' }];
+  if (match[4]) return [{ text: full, className: 'text-amber-400 font-semibold' }];
+  if (match[5]) return [{ text: full, className: 'text-emerald-400 font-semibold' }];
+  if (match[6]) return [{ text: full, className: 'text-sky-400 font-medium' }];
+  if (match[7]) return [{ text: full, className: 'text-violet-400 font-medium' }];
   if (match[8]) {
-    const parts = /^(\S+)(\s+\/[^\s]*\s+)([1-5]\d{2})$/.exec(full);
+    const parts = /^(\S+)(\s+)(\/[^\s]*)(\s+)([1-5]\d{2})$/.exec(full);
     if (parts) {
-      const code = Number(parts[3]);
+      const code = Number(parts[5]);
       const statusCls =
         code < 300
-          ? 'text-emerald-400 font-medium'
+          ? 'text-emerald-400 font-semibold'
           : code < 400
-          ? 'text-amber-400 font-medium'
-          : 'text-red-400 font-medium';
+          ? 'text-amber-400 font-semibold'
+          : 'text-red-400 font-semibold';
       return [
-        { text: parts[1], className: 'text-zinc-100 font-medium' },
+        { text: parts[1], className: 'text-sky-300 font-semibold' },
         { text: parts[2], className: defaultClass },
-        { text: parts[3], className: statusCls },
+        { text: parts[3], className: 'text-zinc-300' },
+        { text: parts[4], className: defaultClass },
+        { text: parts[5], className: statusCls },
       ];
     }
+  }
+  if (match[9]) {
+    return [
+      {
+        text: full,
+        className: 'text-amber-300/90 underline decoration-amber-300/30 underline-offset-2',
+      },
+    ];
+  }
+  if (match[10]) {
+    return [{ text: full, className: 'text-cyan-300' }];
+  }
+  if (match[11]) {
+    const eqIdx = full.indexOf('=');
+    const key = full.slice(0, eqIdx);
+    const val = full.slice(eqIdx + 1);
+    return [
+      { text: key, className: 'text-violet-400 font-medium' },
+      { text: '=', className: 'text-zinc-500' },
+      { text: val, className: 'text-emerald-300' },
+    ];
+  }
+  if (match[12]) {
+    return [{ text: full, className: 'text-sky-300' }];
+  }
+  if (match[13]) {
+    return [{ text: full, className: 'text-emerald-300/90' }];
+  }
+  if (match[14]) {
+    const eqIdx = full.indexOf('=');
+    if (eqIdx !== -1) {
+      return [
+        { text: full.slice(0, eqIdx), className: 'text-sky-300' },
+        { text: '=', className: 'text-zinc-500' },
+        { text: full.slice(eqIdx + 1), className: 'text-amber-300' },
+      ];
+    }
+    return [{ text: full, className: 'text-sky-300' }];
+  }
+  if (match[15]) {
+    return [{ text: full, className: 'text-violet-400 font-medium' }];
+  }
+  if (match[16]) {
+    return [{ text: full, className: 'text-amber-300' }];
   }
 
   return [{ text: full, className: defaultClass }];
@@ -172,7 +387,8 @@ function classifySemanticToken(match: RegExpExecArray, defaultClass: string): Hi
 function tokenizePlainText(
   text: string,
   defaultClass: string,
-  extraClasses: string
+  extraClasses: string,
+  inlineStyle?: CSSProperties
 ): HighlightToken[] {
   const tokens: HighlightToken[] = [];
   SEMANTIC_TOKEN_RE.lastIndex = 0;
@@ -185,6 +401,7 @@ function tokenizePlainText(
       tokens.push({
         text: text.slice(lastIndex, match.index),
         className: [defaultClass, extraClasses].filter(Boolean).join(' '),
+        ...(inlineStyle ? { style: inlineStyle } : {}),
       });
     }
 
@@ -193,6 +410,7 @@ function tokenizePlainText(
       tokens.push({
         text: item.text,
         className: [item.className, extraClasses].filter(Boolean).join(' '),
+        ...(inlineStyle ? { style: inlineStyle } : {}),
       });
     }
 
@@ -203,6 +421,7 @@ function tokenizePlainText(
     tokens.push({
       text: text.slice(lastIndex),
       className: [defaultClass, extraClasses].filter(Boolean).join(' '),
+      ...(inlineStyle ? { style: inlineStyle } : {}),
     });
   }
 
@@ -221,14 +440,16 @@ export function tokenizeConsoleLine(
   for (const seg of segments) {
     if (!seg.text) continue;
     const ansiClass = buildAnsiClassName(seg.style);
+    const ansiInline = buildAnsiInlineStyle(seg.style);
 
-    if (seg.style.fgClass) {
+    if (seg.style.fgClass || seg.style.fgColor || seg.style.inverse) {
       result.push({
         text: seg.text,
         className: ansiClass,
+        ...(ansiInline ? { style: ansiInline } : {}),
       });
     } else {
-      const semantic = tokenizePlainText(seg.text, defaultClass, ansiClass);
+      const semantic = tokenizePlainText(seg.text, defaultClass, ansiClass, ansiInline);
       result.push(...semantic);
     }
   }

@@ -308,7 +308,7 @@ export function allocateNextPort(usedPorts: number[], startPort = 4001, maxPort 
 }
 
 /**
- * Validates a custom internal TCP port for a server (supports NAT VPS forwarded ports).
+ * Validates a custom internal TCP port for a server (supports NAT gateway and container forwarded ports).
  */
 export function validateServerPort(
   portInput: unknown,

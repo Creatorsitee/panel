@@ -7,19 +7,19 @@ import { showErrorAlert, showSuccessToast, showWarningAlert } from '@/lib/swal';
 import {
   getDefaultCpuPercent,
   getDefaultMemoryMb,
-  getVpsCpuOptions,
-  getVpsMemoryOptions,
+  getHostCpuOptions,
+  getHostMemoryOptions,
 } from '@/lib/vps-specs';
 import type {
   AdminUserSummary,
-  HostVpsInfo,
+  HostInfo,
   ServerRuntime,
   ServerWithMetrics,
 } from '@/lib/types';
 
 interface CreateServerModalProps {
   open: boolean;
-  hostInfo: HostVpsInfo | null;
+  hostInfo: HostInfo | null;
   isAdmin?: boolean;
   currentUserId?: string;
   users?: AdminUserSummary[];
@@ -69,8 +69,8 @@ export default function CreateServerModal({
     return ownerOptions[0]?.id || currentUserId || '';
   }, [isAdmin, selectedOwnerId, initialOwnerId, currentUserId, ownerOptions]);
 
-  const memoryOptions = useMemo(() => getVpsMemoryOptions(hostInfo, 0), [hostInfo]);
-  const cpuOptions = useMemo(() => getVpsCpuOptions(hostInfo, 0), [hostInfo]);
+  const memoryOptions = useMemo(() => getHostMemoryOptions(hostInfo, 0), [hostInfo]);
+  const cpuOptions = useMemo(() => getHostCpuOptions(hostInfo, 0), [hostInfo]);
 
   const defaultMemoryMb = getDefaultMemoryMb(hostInfo);
   const defaultCpuPercent = getDefaultCpuPercent(hostInfo);
@@ -106,8 +106,8 @@ export default function CreateServerModal({
   useEffect(() => {
     if (open && resourceUnavailable) {
       void showWarningAlert(
-        'Resource VPS Penuh',
-        'Sisa memori atau batas CPU VPS sudah habis digunakan oleh server aktif lainnya. Hentikan atau kurangi batas resource server lain terlebih dahulu.'
+        'Resource Host Penuh',
+        'Sisa memori atau batas CPU host sudah habis digunakan oleh server aktif lainnya. Hentikan atau kurangi batas resource server lain terlebih dahulu.'
       );
     }
   }, [open, resourceUnavailable]);
@@ -139,8 +139,8 @@ export default function CreateServerModal({
     e.preventDefault();
     if (resourceUnavailable) {
       await showWarningAlert(
-        'Resource VPS Penuh',
-        'Sisa memori atau batas CPU VPS sudah habis digunakan.'
+        'Resource Host Penuh',
+        'Sisa memori atau batas CPU host sudah habis digunakan.'
       );
       return;
     }

@@ -6,12 +6,14 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
+  Cpu,
   FolderOpen,
   LogOut,
   Menu,
@@ -33,7 +35,7 @@ import { connectSseStream } from '@/lib/sse-client';
 import { saveThemeMode, useThemeMode } from '@/lib/theme';
 import { showInfoToast } from '@/lib/swal';
 import type {
-  HostVpsInfo,
+  HostInfo,
   PublicUser,
   ServerRuntimeMetrics,
   ServerWithMetrics,
@@ -44,9 +46,11 @@ export type ServerTab = 'console' | 'files' | 'settings';
 interface PanelContextValue {
   user: PublicUser;
   servers: ServerWithMetrics[];
-  hostInfo: HostVpsInfo | null;
+  hostInfo: HostInfo | null;
   loadingData: boolean;
+  lastHostSnapshotAt: number;
   loadWorkspaceData: () => Promise<void>;
+  refreshHostInfo: () => Promise<void>;
   openCreateModal: () => void;
   handleMetricsUpdate: (serverId: string, metrics: ServerRuntimeMetrics) => void;
   handleServerUpdated: (updated: ServerWithMetrics) => void;
@@ -72,10 +76,12 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
   const [user, setUser] = useState<PublicUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [servers, setServers] = useState<ServerWithMetrics[]>([]);
-  const [hostInfo, setHostInfo] = useState<HostVpsInfo | null>(null);
+  const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
   const [loadingData, setLoadingData] = useState(true);
+  const [lastHostSnapshotAt, setLastHostSnapshotAt] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const lastStreamAtRef = useRef<number>(0);
 
   const serverMatch = pathname.match(/^\/server\/([^/]+?)(?:\/(files|settings))?\/?$/);
   const activeServerId = serverMatch ? decodeURIComponent(serverMatch[1]) : null;
@@ -86,6 +92,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       ? 'settings'
       : 'console';
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
+  const isHostRoute = pathname === '/host' || pathname.startsWith('/host/');
   const activeAdminSection: 'users' | 'servers' | null =
     pathname.startsWith('/admin/server')
       ? 'servers'
@@ -98,7 +105,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       const [meRes, srvRes, hostRes] = await Promise.all([
         apiFetch<{ user: PublicUser | null }>('/api/auth/me'),
         apiFetch<{ servers: ServerWithMetrics[] }>('/api/servers'),
-        apiFetch<{ host: HostVpsInfo }>('/api/host'),
+        apiFetch<{ host: HostInfo }>('/api/host'),
       ]);
       if (!meRes.user) {
         setAuthToken(null);
@@ -125,6 +132,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       );
       setServers(srvRes.servers);
       setHostInfo(hostRes.host);
+      setLastHostSnapshotAt(Date.now());
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setAuthToken(null);
@@ -183,9 +191,34 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
 
   const userId = user?.id ?? null;
 
+  const refreshHostInfo = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ host: HostInfo }>('/api/host');
+      if (res.host) {
+        setHostInfo(res.host);
+        setLastHostSnapshotAt(Date.now());
+      }
+    } catch {
+      // ignore transient host poll errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (lastHostSnapshotAt > 0) {
+      lastStreamAtRef.current = lastHostSnapshotAt;
+    }
+  }, [lastHostSnapshotAt]);
+
   useEffect(() => {
     if (!userId) return;
     let active = true;
+    lastStreamAtRef.current = Date.now();
+
+    void Promise.resolve().then(() => {
+      if (active) {
+        void loadWorkspaceData();
+      }
+    });
 
     const handleUnauthorized = () => {
       setAuthToken(null);
@@ -203,8 +236,15 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
     const disconnect = connectSseStream({
       url: '/api/stream',
       getHeaders: buildAuthHeaders,
+      onActivity: () => {
+        if (active) {
+          lastStreamAtRef.current = Date.now();
+        }
+      },
       onEvent: (eventName, payload) => {
         if (!active) return;
+        const now = Date.now();
+        lastStreamAtRef.current = now;
         if (eventName === 'auth-error') {
           handleUnauthorized();
           return;
@@ -213,7 +253,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
           const data = payload as {
             user?: PublicUser;
             servers?: ServerWithMetrics[];
-            host?: HostVpsInfo;
+            host?: HostInfo;
           };
           if (data.user) {
             const nextUser = data.user;
@@ -232,6 +272,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
           }
           if (data.host) {
             setHostInfo(data.host);
+            setLastHostSnapshotAt(now);
           }
           setLoadingData(false);
         }
@@ -245,11 +286,18 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       },
     });
 
+    const fallbackTimer = setInterval(() => {
+      if (!active) return;
+      if (Date.now() - lastStreamAtRef.current < 2500) return;
+      void loadWorkspaceData();
+    }, 2000);
+
     return () => {
       active = false;
+      clearInterval(fallbackTimer);
       disconnect();
     };
-  }, [userId, router]);
+  }, [userId, router, loadWorkspaceData]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -320,7 +368,9 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
             servers,
             hostInfo,
             loadingData,
+            lastHostSnapshotAt,
             loadWorkspaceData,
+            refreshHostInfo,
             openCreateModal,
             handleMetricsUpdate,
             handleServerUpdated,
@@ -333,7 +383,9 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       servers,
       hostInfo,
       loadingData,
+      lastHostSnapshotAt,
       loadWorkspaceData,
+      refreshHostInfo,
       openCreateModal,
       handleMetricsUpdate,
       handleServerUpdated,
@@ -345,7 +397,15 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
   if (checkingAuth || !user || !contextValue) {
     return (
       <WorkspaceBootSkeleton
-        routeKind={activeServerId ? 'server' : isAdminRoute ? 'admin' : 'dashboard'}
+        routeKind={
+          activeServerId
+            ? 'server'
+            : isAdminRoute
+            ? 'admin'
+            : isHostRoute
+            ? 'host'
+            : 'dashboard'
+        }
         serverTab={activeServerTab}
         adminSection={activeAdminSection ?? 'users'}
       />
@@ -424,13 +484,26 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                 href="/"
                 onClick={() => setMobileNavOpen(false)}
                 className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
-                  !activeServerId && !isAdminRoute
+                  !activeServerId && !isAdminRoute && !isHostRoute
                     ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
                     : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
                 }`}
               >
                 <Server className="w-4 h-4 shrink-0" />
                 <span>Daftar Server</span>
+              </Link>
+
+              <Link
+                href="/host"
+                onClick={() => setMobileNavOpen(false)}
+                className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
+                  !activeServerId && isHostRoute
+                    ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                <Cpu className="w-4 h-4 shrink-0" />
+                <span>Resource Host</span>
               </Link>
 
               {user.role === 'admin' && (
@@ -563,7 +636,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
                 aria-label="Buka menu"
-                className="lg:hidden w-8 h-8 rounded flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
+                className="lg:hidden w-8 h-8 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 flex items-center justify-center transition-colors cursor-pointer shrink-0"
               >
                 <Menu className="w-4 h-4" />
               </button>
@@ -602,6 +675,10 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                       {activeAdminSection === 'servers' ? 'Server' : 'User'}
                     </span>
                   </>
+                ) : isHostRoute ? (
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
+                    Resource Host
+                  </span>
                 ) : (
                   <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
                     Daftar Server
@@ -614,7 +691,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
               {activeServerId ? (
                 <Link
                   href="/"
-                  className="h-8 px-3 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  className="h-8 px-3 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Semua Server</span>
@@ -623,7 +700,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                 <button
                   type="button"
                   onClick={openCreateModal}
-                  className="h-8 px-3.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 text-xs font-medium inline-flex items-center gap-1.5 transition-opacity cursor-pointer whitespace-nowrap"
+                  className="h-8 px-3.5 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Buat Server</span>

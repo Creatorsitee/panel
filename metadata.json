@@ -1,6 +1,6 @@
 {
   "name": "cmnty",
-  "description": "Panel manajemen server Node.js dan Python untuk VPS.",
+  "description": "Panel manajemen server Node.js dan Python mandiri.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

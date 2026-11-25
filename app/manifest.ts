@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'cmnty — Panel Server Node.js & Python Self-Host',
     short_name: 'cmnty',
     description:
-      'Kelola, pantau, dan jalankan server Node.js serta Python secara real-time di VPS self-host.',
+      'Kelola, pantau, dan jalankan server Node.js serta Python secara real-time secara self-host.',
     start_url: '/',
     display: 'standalone',
     background_color: '#09090B',

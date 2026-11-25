@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# cmnty — Automated VPS Installer (Ubuntu / Debian)
+# cmnty — Automated Server Installer (Ubuntu / Debian)
 # Usage: git clone <your-repo-url> cmnty && cd cmnty && sudo bash install.sh
 
 if [ "$(id -u)" -ne 0 ]; then

@@ -5,7 +5,7 @@ import {
   listAllServers,
   listServersForUser,
 } from '@/lib/db';
-import { getHostVpsInfo, getServerMetrics } from '@/lib/process-manager';
+import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
 import { requireAuth } from '@/lib/route-guard';
 import {
   allocateNextPort,
@@ -80,16 +80,16 @@ export async function POST(req: NextRequest) {
     const startupCommand = (body.startupCommand || defaultCommand).trim();
     parseSafeStartupCommand(startupCommand, runtime);
 
-    const host = getHostVpsInfo();
+    const host = getHostInfo();
     if (host.availableMemoryMb < 512) {
       return NextResponse.json(
-        { error: 'Sisa memori VPS sudah tidak mencukupi (minimal 512 MB tersedia).' },
+        { error: 'Sisa memori host sudah tidak mencukupi (minimal 512 MB tersedia).' },
         { status: 400 }
       );
     }
     if (host.availableCpuPercent < 10) {
       return NextResponse.json(
-        { error: 'Sisa batas CPU VPS sudah tidak mencukupi (minimal 10% tersedia).' },
+        { error: 'Sisa batas CPU host sudah tidak mencukupi (minimal 10% tersedia).' },
         { status: 400 }
       );
     }
@@ -106,25 +106,25 @@ export async function POST(req: NextRequest) {
 
     if (Number.isFinite(requestedMem) && requestedMem > host.availableMemoryMb) {
       return NextResponse.json(
-        { error: `Alokasi memori melebihi sisa kapasitas VPS (${host.availableMemoryMb} MB tersedia).` },
+        { error: `Alokasi memori melebihi sisa kapasitas host (${host.availableMemoryMb} MB tersedia).` },
         { status: 400 }
       );
     }
     if (Number.isFinite(requestedMem) && requestedMem > perServerMaxMem) {
       return NextResponse.json(
-        { error: `Alokasi memori per server maksimal ${perServerMaxMem} MB agar resource VPS tetap merata.` },
+        { error: `Alokasi memori per server maksimal ${perServerMaxMem} MB agar resource host tetap merata.` },
         { status: 400 }
       );
     }
     if (Number.isFinite(requestedCpu) && requestedCpu > host.availableCpuPercent) {
       return NextResponse.json(
-        { error: `Batas CPU melebihi sisa kapasitas VPS (${host.availableCpuPercent}% tersedia).` },
+        { error: `Batas CPU melebihi sisa kapasitas host (${host.availableCpuPercent}% tersedia).` },
         { status: 400 }
       );
     }
     if (Number.isFinite(requestedCpu) && requestedCpu > perServerMaxCpu) {
       return NextResponse.json(
-        { error: `Batas CPU per server maksimal ${perServerMaxCpu}% agar resource VPS tetap merata.` },
+        { error: `Batas CPU per server maksimal ${perServerMaxCpu}% agar resource host tetap merata.` },
         { status: 400 }
       );
     }

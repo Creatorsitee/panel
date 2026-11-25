@@ -50,6 +50,7 @@ export interface ServerRuntimeMetrics {
   uptimeSeconds: number;
   exitCode: number | null;
   startedAt: string | null;
+  awaitingInput: boolean;
 }
 
 export interface ServerWithMetrics extends ServerConfig {
@@ -71,7 +72,7 @@ export interface FileEntry {
   updatedAt: string;
 }
 
-export interface HostVpsInfo {
+export interface HostInfo {
   hostname: string;
   platform: string;
   osDistro: string;
@@ -93,6 +94,10 @@ export interface HostVpsInfo {
   diskFreeGb: number;
   allocatedMemoryMb: number;
   allocatedCpuPercent: number;
+  totalAllocatedMemoryMb: number;
+  totalAllocatedCpuPercent: number;
+  panelMemoryUsedMb: number;
+  panelCpuPercent: number;
   availableMemoryMb: number;
   availableCpuPercent: number;
   uptimeSeconds: number;

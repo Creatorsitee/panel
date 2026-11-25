@@ -6,7 +6,7 @@ import {
   listAllUsers,
   listServersForUser,
 } from '@/lib/db';
-import { getHostVpsInfo, getServerMetrics } from '@/lib/process-manager';
+import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
 import { subscribeWorkspaceEvents } from '@/lib/realtime-bus';
 import { requireAuth } from '@/lib/route-guard';
 import type {
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
           return;
         }
 
-        const host = getHostVpsInfo();
+        const host = getHostInfo();
 
         if (scope === 'admin') {
           const users = listAllUsers();
@@ -155,7 +155,7 @@ export async function GET(req: NextRequest) {
         });
       };
 
-      sendRaw(': connected\n\n');
+      sendRaw('retry: 1000\n: connected\n\n');
       pushSnapshot();
 
       unsubscribe = subscribeWorkspaceEvents(() => {

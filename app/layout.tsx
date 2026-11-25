@@ -4,7 +4,7 @@ import './globals.css';
 const appUrl = process.env.APP_URL || 'http://localhost:3000';
 const siteTitle = 'cmnty — Node.js & Python Server Management Panel';
 const siteDescription =
-  'Panel manajemen server mandiri untuk mengelola aplikasi Node.js dan Python secara real-time di VPS.';
+  'Panel manajemen server mandiri untuk mengelola aplikasi Node.js dan Python secara real-time di server maupun Railway.';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     'server panel',
     'Node.js manager',
     'Python server',
-    'VPS dashboard',
+    'host dashboard',
     'process monitor',
     'file manager',
   ],

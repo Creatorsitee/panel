@@ -1,6 +1,6 @@
-# cmnty VPS Management Panel
+# cmnty Server Management Panel
 
-A lightweight, self-hosted Node.js & Python server management panel designed for standard VPS and NAT Gateway environments, featuring real-time streaming telemetry and terminal access.
+A lightweight, self-hosted Node.js & Python server management panel designed for cloud containers (such as Railway), dedicated servers, and NAT Gateway environments, featuring real-time streaming telemetry and terminal access.
 
 ---
 
@@ -8,7 +8,7 @@ A lightweight, self-hosted Node.js & Python server management panel designed for
 
 - **Multi-Runtime Support**: First-class execution for Node.js (`node`, `npm`, `npx`, `tsx`) and Python (`python3`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `pytest`).
 - **Resource Management**: Fair-share memory (`512 MB` to `16 GB`) and CPU percentage (`10%` to `100%`) allocation to ensure stable multi-server hosting.
-- **NAT Gateway & Port Forwarding**: Configurable internal server ports mapped cleanly for NAT VPS setups.
+- **NAT Gateway & Port Forwarding**: Configurable internal server ports mapped cleanly for NAT gateway and container setups.
 - **Real-Time Telemetry & Console**: Server-Sent Events (SSE) powered live logs, stdout/stderr high-signal highlighting, interactive resource charts, and stdin command execution.
 - **Integrated File Manager**: Built-in file editor, ZIP archive extraction, directory tree management, and `.env` configuration support.
 - **Role-Based Access Control (RBAC)**: Secure administrator and user workspace isolation.
@@ -39,7 +39,7 @@ For **Railway**, simply connect your repository, add a persistent Volume mounted
 
 ### Option 2: Native Ubuntu / Debian Setup
 
-Clone the repository to your VPS and run the automated installation script:
+Clone the repository to your Linux server and run the automated installation script:
 
 ```bash
 git clone <repository-url> cmnty

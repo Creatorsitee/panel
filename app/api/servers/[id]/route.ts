@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteServerRecord, getUserById, listAllServers, updateServerRecord } from '@/lib/db';
 import { updateServerDotEnvPort } from '@/lib/file-manager';
-import { getHostVpsInfo, getServerMetrics, stopServerProcess } from '@/lib/process-manager';
+import { getHostInfo, getServerMetrics, stopServerProcess } from '@/lib/process-manager';
 import { requireServerAccess } from '@/lib/route-guard';
 import {
   parseSafeStartupCommand,
@@ -53,7 +53,7 @@ export async function PATCH(
       autoRestart?: boolean;
     };
 
-    const host = getHostVpsInfo();
+    const host = getHostInfo();
     const currentMetrics = getServerMetrics(id);
     const isServerActive =
       currentMetrics.status === 'running' ||
@@ -123,7 +123,7 @@ export async function PATCH(
       if (Number.isFinite(requestedMem) && requestedMem !== access.server.memoryLimitMb) {
         if (requestedMem > maxMemoryForServer) {
           return NextResponse.json(
-            { error: `Alokasi memori melebihi batas per server atau sisa kapasitas VPS (${maxMemoryForServer} MB).` },
+            { error: `Alokasi memori melebihi batas per server atau sisa kapasitas host (${maxMemoryForServer} MB).` },
             { status: 400 }
           );
         }
@@ -139,7 +139,7 @@ export async function PATCH(
       if (Number.isFinite(requestedCpu) && requestedCpu !== access.server.cpuLimitPercent) {
         if (requestedCpu > maxCpuForServer) {
           return NextResponse.json(
-            { error: `Batas CPU melebihi batas per server atau sisa kapasitas VPS (${maxCpuForServer}%).` },
+            { error: `Batas CPU melebihi batas per server atau sisa kapasitas host (${maxCpuForServer}%).` },
             { status: 400 }
           );
         }
