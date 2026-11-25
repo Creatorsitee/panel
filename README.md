@@ -1,41 +1,72 @@
-# cmnty — Self-Hosted VPS Panel
+# cmnty VPS Management Panel
 
-Panel manajemen server Node.js dan Python mandiri real-time bergaya Pterodactyl yang dirancang untuk VPS standar maupun VPS dengan NAT Gateway.
+A lightweight, self-hosted Node.js & Python server management panel designed for standard VPS and NAT Gateway environments, featuring real-time streaming telemetry and terminal access.
 
-## Fitur Utama
-- **Manajemen Proses Multi-Runtime**: Dukungan penuh untuk aplikasi dan bot Node.js (`node`, `npm`, `npx`, `tsx`) serta Python (`python3`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `pytest`).
-- **Pilihan Resource Adil (Fair-Share)**: Alokasi memori minimal 512 MB hingga 4 GB dan batas CPU proporsional agar pembuatan server tidak langsung menghabiskan resource VPS.
-- **Dukungan NAT VPS & Port Internal**: Memungkinkan pengaturan Port Internal khusus agar terhubung mulus dengan port forwarding NAT Gateway (mis. Public `38.49.215.170:port` -> Internal VPS).
-- **Terminal Real-Time & Pterodactyl-Style Charts**: Live stream log daemon/stdout/stderr, area chart CPU Load & Memory interaktif, serta input perintah stdin.
-- **File Manager Terintegrasi**: Editor file, upload ZIP otomatis, buat/hapus/rename direktori, dan sinkronisasi `.env`.
-- **Notifikasi SweetAlert2 & Shimmer Skeleton**: Pengalaman pengguna modern, clean, dan responsif.
+---
 
-## Deploy Otomatis ke VPS (Ubuntu / Debian)
+## Key Features
 
-Cukup `git clone` repositori ini ke VPS Anda dan jalankan skrip installer otomatis:
+- **Multi-Runtime Support**: First-class execution for Node.js (`node`, `npm`, `npx`, `tsx`) and Python (`python3`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `pytest`).
+- **Resource Management**: Fair-share memory (`512 MB` to `16 GB`) and CPU percentage (`10%` to `100%`) allocation to ensure stable multi-server hosting.
+- **NAT Gateway & Port Forwarding**: Configurable internal server ports mapped cleanly for NAT VPS setups.
+- **Real-Time Telemetry & Console**: Server-Sent Events (SSE) powered live logs, stdout/stderr high-signal highlighting, interactive resource charts, and stdin command execution.
+- **Integrated File Manager**: Built-in file editor, ZIP archive extraction, directory tree management, and `.env` configuration support.
+- **Role-Based Access Control (RBAC)**: Secure administrator and user workspace isolation.
+
+---
+
+## Tech Stack
+
+- **Framework**: Next.js 15 (App Router) with React 19 & TypeScript
+- **Styling**: Tailwind CSS v4 with Lucide icons
+- **State & Transport**: Server-Sent Events (SSE) streaming & SQLite-backed persistent JSON store
+- **Process Supervision**: Native Node.js child process manager with RSS memory limits and OOM auto-termination
+
+---
+
+## Installation & Deployment
+
+### Option 1: Docker / Railway (Recommended)
+
+This project includes a production-ready `Dockerfile` optimized for containerized environments such as Railway, Render, or self-hosted Docker:
 
 ```bash
-git clone <url-repositori-anda> cmnty
+docker build -t cmnty-panel .
+docker run -d -p 3000:3000 -v /path/to/data:/app/data cmnty-panel
+```
+
+For **Railway**, simply connect your repository, add a persistent Volume mounted at `/app/data`, and deploy.
+
+### Option 2: Native Ubuntu / Debian Setup
+
+Clone the repository to your VPS and run the automated installation script:
+
+```bash
+git clone <repository-url> cmnty
 cd cmnty
 sudo bash install.sh
 ```
 
-Installer akan otomatis:
-1. Memastikan Node.js 22 LTS, Python 3, `pip3`, dan `git` terpasang.
-2. Membuat kunci sesi rahasia (`PANEL_SESSION_SECRET`) di `.env`.
-3. Membangun aplikasi produksi (`npm run build`).
-4. Mendaftarkan dan menjalankan service systemd (`cmnty-panel.service`) pada port internal `3000`.
+The installer automatically handles:
+1. Node.js 22 LTS, Python 3, `pip`, and `git` prerequisites.
+2. Production environment generation and secret keying.
+3. Next.js build compilation (`npm run build`).
+4. Systemd service registration (`cmnty-panel.service`) running on port `3000`.
 
-## Menjalankan di Lingkungan NAT VPS
-1. Jalankan panel `cmnty` di dalam VPS pada port internal **`3000`**.
-2. Akses panel dari internet menggunakan IP Publik dan Port Publik yang telah diforward (misal `http://38.49.215.170:6705`).
-3. Saat membuat server aplikasi atau bot di dalam panel, tentukan **Port Internal** sesuai port yang telah di-approve pada NAT Gateway VPS Anda.
+---
 
-## Menjalankan dengan PM2
+## Environment Variables
 
-```bash
-npm ci --omit=dev=false
-npm run build
-pm2 start ecosystem.config.js
-pm2 save
+Configure application behavior using a `.env` file in the root directory:
+
+```env
+NODE_ENV=production
+PORT=3000
+PANEL_SESSION_SECRET=your_secure_random_secret_here
 ```
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
