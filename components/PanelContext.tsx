@@ -23,11 +23,13 @@ import {
   Shield,
   Sun,
   Terminal,
+  Users,
   X,
 } from 'lucide-react';
-import { ApiError, apiFetch, setAuthToken } from './api-client';
+import { ApiError, apiFetch, buildAuthHeaders, setAuthToken } from './api-client';
 import CreateServerModal from './CreateServerModal';
 import { WorkspaceBootSkeleton } from './Skeletons';
+import { connectSseStream } from '@/lib/sse-client';
 import { saveThemeMode, useThemeMode } from '@/lib/theme';
 import { showInfoToast } from '@/lib/swal';
 import type {
@@ -84,6 +86,12 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
       ? 'settings'
       : 'console';
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
+  const activeAdminSection: 'users' | 'servers' | null =
+    pathname.startsWith('/admin/server')
+      ? 'servers'
+      : isAdminRoute
+      ? 'users'
+      : null;
 
   const loadWorkspaceData = useCallback(async () => {
     try {
@@ -178,19 +186,70 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (!userId) return;
     let active = true;
-    const runFetch = async () => {
-      if (!active) return;
-      await loadWorkspaceData();
+
+    const handleUnauthorized = () => {
+      setAuthToken(null);
+      setUser(null);
+      setServers([]);
+      const currentPath =
+        typeof window !== 'undefined' ? window.location.pathname : '/';
+      const nextQuery =
+        currentPath && currentPath !== '/'
+          ? `?next=${encodeURIComponent(currentPath)}`
+          : '';
+      router.replace(`/login${nextQuery}`);
     };
-    void runFetch();
-    const timer = setInterval(() => {
-      void runFetch();
-    }, 5000);
+
+    const disconnect = connectSseStream({
+      url: '/api/stream',
+      getHeaders: buildAuthHeaders,
+      onEvent: (eventName, payload) => {
+        if (!active) return;
+        if (eventName === 'auth-error') {
+          handleUnauthorized();
+          return;
+        }
+        if (eventName === 'snapshot' && payload && typeof payload === 'object') {
+          const data = payload as {
+            user?: PublicUser;
+            servers?: ServerWithMetrics[];
+            host?: HostVpsInfo;
+          };
+          if (data.user) {
+            const nextUser = data.user;
+            setUser((prev) =>
+              prev &&
+              prev.id === nextUser.id &&
+              prev.role === nextUser.role &&
+              prev.name === nextUser.name &&
+              prev.email === nextUser.email
+                ? prev
+                : nextUser
+            );
+          }
+          if (Array.isArray(data.servers)) {
+            setServers(data.servers);
+          }
+          if (data.host) {
+            setHostInfo(data.host);
+          }
+          setLoadingData(false);
+        }
+      },
+      onHttpError: (status) => {
+        if (!active) return;
+        if (status === 401) {
+          handleUnauthorized();
+        }
+        setLoadingData(false);
+      },
+    });
+
     return () => {
       active = false;
-      clearInterval(timer);
+      disconnect();
     };
-  }, [userId, loadWorkspaceData]);
+  }, [userId, router]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -284,7 +343,13 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
   );
 
   if (checkingAuth || !user || !contextValue) {
-    return <WorkspaceBootSkeleton />;
+    return (
+      <WorkspaceBootSkeleton
+        routeKind={activeServerId ? 'server' : isAdminRoute ? 'admin' : 'dashboard'}
+        serverTab={activeServerTab}
+        adminSection={activeAdminSection ?? 'users'}
+      />
+    );
   }
 
   const encodedServerId = activeServerId ? encodeURIComponent(activeServerId) : '';
@@ -369,18 +434,36 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
               </Link>
 
               {user.role === 'admin' && (
-                <Link
-                  href="/admin"
-                  onClick={() => setMobileNavOpen(false)}
-                  className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
-                    !activeServerId && isAdminRoute
-                      ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
-                      : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
-                  }`}
-                >
-                  <Shield className="w-4 h-4 shrink-0" />
-                  <span>Panel Admin</span>
-                </Link>
+                <>
+                  <div className="px-3 pt-4 pb-1 text-[10px] font-semibold tracking-wider text-zinc-400 uppercase flex items-center gap-1.5">
+                    <Shield className="w-3 h-3 shrink-0" />
+                    <span>Panel Admin</span>
+                  </div>
+                  <Link
+                    href="/admin/user"
+                    onClick={() => setMobileNavOpen(false)}
+                    className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
+                      !activeServerId && activeAdminSection === 'users'
+                        ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <Users className="w-4 h-4 shrink-0" />
+                    <span>Kelola User</span>
+                  </Link>
+                  <Link
+                    href="/admin/server"
+                    onClick={() => setMobileNavOpen(false)}
+                    className={`w-full h-9 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-colors ${
+                      !activeServerId && activeAdminSection === 'servers'
+                        ? 'bg-zinc-900 dark:bg-zinc-800 text-white dark:text-zinc-100'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <Server className="w-4 h-4 shrink-0" />
+                    <span>Kelola Server</span>
+                  </Link>
+                </>
               )}
             </div>
 
@@ -510,9 +593,18 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                     </span>
                   </>
                 ) : isAdminRoute && user.role === 'admin' ? (
-                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
-                    Panel Admin
-                  </span>
+                  <>
+                    <Link
+                      href="/admin/user"
+                      className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors whitespace-nowrap shrink-0"
+                    >
+                      Panel Admin
+                    </Link>
+                    <span className="text-zinc-400 shrink-0">/</span>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
+                      {activeAdminSection === 'servers' ? 'Server' : 'User'}
+                    </span>
+                  </>
                 ) : (
                   <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap truncate">
                     Daftar Server
@@ -551,9 +643,11 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
         <CreateServerModal
           open={createOpen}
           hostInfo={hostInfo}
+          isAdmin={user.role === 'admin'}
+          currentUserId={user.id}
           onClose={() => setCreateOpen(false)}
           onCreated={(created) => {
-            setServers((prev) => [created, ...prev]);
+            upsertServer(created);
             void loadWorkspaceData();
             router.push(`/server/${encodeURIComponent(created.id)}`);
           }}

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { emitWorkspaceChanged } from './realtime-bus';
 import type { ServerConfig, UserRecord, UserRole } from './types';
 
 interface DatabaseState {
@@ -116,6 +117,7 @@ export async function createUser(input: {
     };
     db.users.push(user);
     writeDbSync(db);
+    emitWorkspaceChanged('user:create');
     return user;
   });
 }
@@ -142,6 +144,7 @@ export async function createUserByAdmin(input: {
     };
     db.users.push(user);
     writeDbSync(db);
+    emitWorkspaceChanged('user:create');
     return user;
   });
 }
@@ -179,6 +182,7 @@ export async function updateUserRecord(
     };
     db.users[idx] = updated;
     writeDbSync(db);
+    emitWorkspaceChanged('user:update');
     return updated;
   });
 }
@@ -198,6 +202,7 @@ export async function deleteUserRecord(userId: string): Promise<void> {
     }
     db.users = db.users.filter((u) => u.id !== userId);
     writeDbSync(db);
+    emitWorkspaceChanged('user:delete');
   });
 }
 
@@ -223,9 +228,13 @@ export async function createServerRecord(
   return withWriteLock(() => {
     const db = readDbSync();
     const now = new Date().toISOString();
+    let generatedId = crypto.randomBytes(4).toString('hex');
+    while (db.servers.some((s) => s.id === generatedId)) {
+      generatedId = crypto.randomBytes(4).toString('hex');
+    }
     const server: ServerConfig = {
       ...config,
-      id: `srv_${crypto.randomBytes(5).toString('hex')}`,
+      id: generatedId,
       createdAt: now,
       updatedAt: now,
     };
@@ -236,6 +245,7 @@ export async function createServerRecord(
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+    emitWorkspaceChanged('server:create');
     return server;
   });
 }
@@ -269,6 +279,7 @@ export async function updateServerRecord(
     };
     db.servers[idx] = updated;
     writeDbSync(db);
+    emitWorkspaceChanged('server:update');
     return updated;
   });
 }
@@ -283,5 +294,6 @@ export async function deleteServerRecord(serverId: string): Promise<void> {
     if (fs.existsSync(dir)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+    emitWorkspaceChanged('server:delete');
   });
 }

@@ -11,8 +11,21 @@ import {
   verifyServerPythonModule,
   verifyServerScriptFile,
 } from './file-manager';
+import {
+  computeCpuPercentDelta,
+  parseMeminfoSwapMb,
+  parseOsPrettyName,
+  parseProcStatCpuSnapshot,
+  type ProcCpuSnapshot,
+} from './host-stats-utils';
 import { parseSafeStartupCommand } from './security';
+import { emitWorkspaceChanged } from './realtime-bus';
 import type { ConsoleLine, HostVpsInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
+
+interface PartialStreamBuffer {
+  text: string;
+  timer: ReturnType<typeof setTimeout> | null;
+}
 
 interface ManagedProcess {
   serverId: string;
@@ -23,7 +36,12 @@ interface ManagedProcess {
   startedAtMs: number | null;
   exitCode: number | null;
   manualStop: boolean;
+  oomKilled: boolean;
   logs: ConsoleLine[];
+  partialBuffers: {
+    stdout: PartialStreamBuffer;
+    stderr: PartialStreamBuffer;
+  };
   lastCpuJiffies?: number;
   lastSampleTimeMs?: number;
   cpuPercent: number;
@@ -35,7 +53,13 @@ const MAX_LOG_LINES = 400;
 const globalForPm = globalThis as unknown as {
   __nodalProcesses?: Map<string, ManagedProcess>;
   __nodalEvents?: EventEmitter;
-  __nodalSystemVersions?: { pythonVersion: string | null };
+  __nodalSystemVersions?: {
+    osDistro: string;
+    npmVersion: string | null;
+    pythonVersion: string | null;
+    pipVersion: string | null;
+  };
+  __nodalHostCpuSample?: ProcCpuSnapshot | null;
 };
 
 function getProcessMap(): Map<string, ManagedProcess> {
@@ -67,7 +91,12 @@ function getOrCreateState(serverId: string): ManagedProcess {
       startedAtMs: null,
       exitCode: null,
       manualStop: false,
+      oomKilled: false,
       logs: [],
+      partialBuffers: {
+        stdout: { text: '', timer: null },
+        stderr: { text: '', timer: null },
+      },
       cpuPercent: 0,
       memoryMb: 0,
     };
@@ -76,28 +105,100 @@ function getOrCreateState(serverId: string): ManagedProcess {
   return state;
 }
 
-function appendLog(serverId: string, stream: ConsoleLine['stream'], rawText: string): void {
+function pushConsoleLine(
+  serverId: string,
+  stream: ConsoleLine['stream'],
+  text: string
+): void {
   const state = getOrCreateState(serverId);
+  const entry: ConsoleLine = {
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    stream,
+    text,
+  };
+  state.logs.push(entry);
+  if (state.logs.length > MAX_LOG_LINES) {
+    state.logs.shift();
+  }
+  getEmitter().emit(`log:${serverId}`, entry);
+}
+
+function flushStreamBuffer(
+  serverId: string,
+  stream: 'stdout' | 'stderr'
+): void {
+  const state = getOrCreateState(serverId);
+  const buf = state.partialBuffers[stream];
+  if (buf.timer) {
+    clearTimeout(buf.timer);
+    buf.timer = null;
+  }
+  if (buf.text.length > 0) {
+    const text = buf.text;
+    buf.text = '';
+    pushConsoleLine(serverId, stream, text);
+  }
+}
+
+function appendStreamChunk(
+  serverId: string,
+  stream: 'stdout' | 'stderr',
+  rawText: string
+): void {
+  const state = getOrCreateState(serverId);
+  const buf = state.partialBuffers[stream];
+  if (buf.timer) {
+    clearTimeout(buf.timer);
+    buf.timer = null;
+  }
+
+  let current = buf.text + rawText.replace(/\r\n/g, '\n');
+  let newlineIdx = current.indexOf('\n');
+
+  while (newlineIdx !== -1) {
+    const rawLine = current.slice(0, newlineIdx);
+    current = current.slice(newlineIdx + 1);
+    // Handle carriage return overwrites on a single line (e.g. progress bars)
+    const crParts = rawLine.split('\r');
+    const finalLine = crParts[crParts.length - 1] ?? '';
+    pushConsoleLine(serverId, stream, finalLine);
+    newlineIdx = current.indexOf('\n');
+  }
+
+  if (current.includes('\r')) {
+    const crParts = current.split('\r');
+    current = crParts[crParts.length - 1] ?? '';
+  }
+
+  buf.text = current;
+  if (buf.text.length > 0) {
+    buf.timer = setTimeout(() => {
+      flushStreamBuffer(serverId, stream);
+    }, 45);
+  }
+}
+
+function appendLog(
+  serverId: string,
+  stream: ConsoleLine['stream'],
+  rawText: string
+): void {
+  if (stream === 'stdout' || stream === 'stderr') {
+    appendStreamChunk(serverId, stream, rawText);
+    return;
+  }
   const lines = rawText.replace(/\r\n/g, '\n').split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (i === lines.length - 1 && line === '') continue;
-    const entry: ConsoleLine = {
-      id: crypto.randomBytes(4).toString('hex'),
-      timestamp: new Date().toISOString(),
-      stream,
-      text: line,
-    };
-    state.logs.push(entry);
-    if (state.logs.length > MAX_LOG_LINES) {
-      state.logs.shift();
-    }
-    getEmitter().emit(`log:${serverId}`, entry);
+    pushConsoleLine(serverId, stream, line);
   }
 }
 
 function emitStatus(serverId: string): void {
   getEmitter().emit(`status:${serverId}`, getServerMetrics(serverId));
+  emitWorkspaceChanged(`status:${serverId}`);
 }
 
 function collectProcessGroupPids(rootPid: number): number[] {
@@ -213,12 +314,14 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
 
     const server = getServerById(state.serverId);
     if (server && memoryMb > server.memoryLimitMb && state.child) {
-      state.manualStop = true;
+      state.oomKilled = true;
+      state.status = 'stopping';
       appendLog(
         state.serverId,
         'system',
-        `Memori (${memoryMb} MB) melebihi batas ${server.memoryLimitMb} MB. Menghentikan proses...`
+        `Process exceeded allocated memory limit (${memoryMb} MiB / ${server.memoryLimitMb} MiB). Terminating...`
       );
+      emitStatus(state.serverId);
       killProcessTree(state.child, 'SIGKILL');
     }
 
@@ -253,21 +356,34 @@ export function getConsoleHistory(serverId: string): ConsoleLine[] {
 
 export function clearConsoleHistory(serverId: string): void {
   const state = getOrCreateState(serverId);
+  if (state.partialBuffers.stdout.timer) {
+    clearTimeout(state.partialBuffers.stdout.timer);
+    state.partialBuffers.stdout.timer = null;
+  }
+  if (state.partialBuffers.stderr.timer) {
+    clearTimeout(state.partialBuffers.stderr.timer);
+    state.partialBuffers.stderr.timer = null;
+  }
+  state.partialBuffers.stdout.text = '';
+  state.partialBuffers.stderr.text = '';
   state.logs = [];
-  appendLog(serverId, 'system', 'Console dibersihkan.');
+  getEmitter().emit(`clear:${serverId}`);
 }
 
 export function subscribeConsole(
   serverId: string,
   onLog: (line: ConsoleLine) => void,
-  onStatus: (metrics: ServerRuntimeMetrics) => void
+  onStatus: (metrics: ServerRuntimeMetrics) => void,
+  onClear?: () => void
 ): () => void {
   const emitter = getEmitter();
   emitter.on(`log:${serverId}`, onLog);
   emitter.on(`status:${serverId}`, onStatus);
+  if (onClear) emitter.on(`clear:${serverId}`, onClear);
   return () => {
     emitter.off(`log:${serverId}`, onLog);
     emitter.off(`status:${serverId}`, onStatus);
+    if (onClear) emitter.off(`clear:${serverId}`, onClear);
   };
 }
 
@@ -359,19 +475,23 @@ function runProcessCommand(
     child.stdout.on('data', (chunk: Buffer) => appendLog(serverId, 'stdout', chunk.toString('utf8')));
     child.stderr.on('data', (chunk: Buffer) => appendLog(serverId, 'stderr', chunk.toString('utf8')));
     child.on('error', (err) => {
+      flushStreamBuffer(serverId, 'stdout');
+      flushStreamBuffer(serverId, 'stderr');
       if (state.installChild === child) state.installChild = null;
-      reject(new Error(`Gagal menjalankan ${executable}: ${err.message}`));
+      reject(new Error(`Failed to execute ${executable}: ${err.message}`));
     });
     child.on('close', (code) => {
+      flushStreamBuffer(serverId, 'stdout');
+      flushStreamBuffer(serverId, 'stderr');
       if (state.installChild === child) state.installChild = null;
       if (state.manualStop) {
-        reject(new Error('Instalasi dihentikan oleh pengguna.'));
+        reject(new Error('Installation aborted by user.'));
         return;
       }
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`Proses ${executable} berhenti dengan kode keluar ${code ?? 'null'}.`));
+        reject(new Error(`Process ${executable} exited with status code ${code ?? 'null'}.`));
       }
     });
   });
@@ -401,7 +521,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
     } catch {
       state.status = 'error';
       emitStatus(server.id);
-      const msg = 'File package.json tidak valid (format JSON rusak).';
+      const msg = 'Invalid package.json file (malformed JSON syntax).';
       appendLog(server.id, 'system', msg);
       throw new Error(msg);
     }
@@ -415,15 +535,15 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
 
     state.status = 'installing';
     emitStatus(server.id);
-    appendLog(server.id, 'system', 'Otomatis menginstall dependensi dari package.json (npm install)...');
+    appendLog(server.id, 'system', 'Installing dependencies from package.json (npm install)...');
 
     try {
       await runProcessCommand(server.id, cwd, 'npm', ['install', '--no-audit', '--no-fund']);
-      appendLog(server.id, 'system', 'Dependensi package.json berhasil dipasang.');
+      appendLog(server.id, 'system', 'Dependencies from package.json installed successfully.');
     } catch (err) {
       state.status = 'error';
       emitStatus(server.id);
-      const msg = err instanceof Error ? err.message : 'Instalasi package.json gagal.';
+      const msg = err instanceof Error ? err.message : 'Failed to install dependencies from package.json.';
       appendLog(server.id, 'system', msg);
       throw new Error(msg);
     }
@@ -449,7 +569,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
 
   state.status = 'installing';
   emitStatus(server.id);
-  appendLog(server.id, 'system', 'Otomatis menginstall dependensi dari requirements.txt...');
+  appendLog(server.id, 'system', 'Installing dependencies from requirements.txt...');
 
   const venvPip = path.join(cwd, '.venv', 'bin', 'pip');
   try {
@@ -472,7 +592,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
         '-r',
         'requirements.txt',
       ]);
-      appendLog(server.id, 'system', 'Dependensi requirements.txt berhasil dipasang ke .venv.');
+      appendLog(server.id, 'system', 'Dependencies from requirements.txt installed into .venv.');
       return;
     }
 
@@ -485,7 +605,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
         '-r',
         'requirements.txt',
       ]);
-      appendLog(server.id, 'system', 'Dependensi requirements.txt berhasil dipasang.');
+      appendLog(server.id, 'system', 'Dependencies from requirements.txt installed successfully.');
       return;
     }
 
@@ -500,17 +620,17 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
         '-r',
         'requirements.txt',
       ]);
-      appendLog(server.id, 'system', 'Dependensi requirements.txt berhasil dipasang.');
+      appendLog(server.id, 'system', 'Dependencies from requirements.txt installed successfully.');
       return;
     }
 
     throw new Error(
-      'File requirements.txt ditemukan, tetapi pip3 / python3-venv tidak tersedia di sistem host.'
+      'Found requirements.txt, but neither pip3 nor python3-venv is available on the host system.'
     );
   } catch (err) {
     state.status = 'error';
     emitStatus(server.id);
-    const msg = err instanceof Error ? err.message : 'Instalasi requirements.txt gagal.';
+    const msg = err instanceof Error ? err.message : 'Failed to install dependencies from requirements.txt.';
     appendLog(server.id, 'system', msg);
     throw new Error(msg);
   }
@@ -550,30 +670,50 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   }
 
   const state = getOrCreateState(serverId);
-  if (state.status === 'running' || state.status === 'starting' || state.status === 'installing') {
+  if (
+    state.status === 'running' ||
+    state.status === 'starting' ||
+    state.status === 'installing' ||
+    state.status === 'stopping'
+  ) {
     throw new Error(`Server sedang dalam status "${state.status}".`);
   }
 
-  const cwd = ensureServerDir(serverId);
-  const parsed = parseSafeStartupCommand(server.startupCommand, server.runtime);
+  state.status = 'starting';
+  state.manualStop = false;
+  state.oomKilled = false;
+  state.exitCode = null;
+  state.lastCpuJiffies = undefined;
+  state.lastSampleTimeMs = undefined;
+  emitStatus(serverId);
 
+  appendLog(serverId, 'system', 'Checking server disk space usage, this could take a few seconds...');
+  appendLog(serverId, 'system', 'Updating process configuration files...');
+  appendLog(serverId, 'system', 'Ensuring file permissions are set correctly, this could take a few seconds...');
+  appendLog(serverId, 'system', 'Server marked as starting...');
+
+  let cwd: string;
+  let parsed: ReturnType<typeof parseSafeStartupCommand>;
   try {
+    cwd = ensureServerDir(serverId);
+    parsed = parseSafeStartupCommand(server.startupCommand, server.runtime);
+
     if (parsed.npmScriptName) {
       const pkgPath = path.join(cwd, 'package.json');
       if (!fs.existsSync(pkgPath)) {
         throw new Error(
-          `File package.json tidak ditemukan di direktori server ini untuk "${server.startupCommand}".`
+          `package.json was not found in this server directory for "${server.startupCommand}".`
         );
       }
       let pkgJson: { scripts?: Record<string, string> };
       try {
         pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       } catch {
-        throw new Error('File package.json tidak valid.');
+        throw new Error('Invalid package.json file.');
       }
       const scriptCmd = pkgJson.scripts?.[parsed.npmScriptName];
       if (!scriptCmd) {
-        throw new Error(`Script "${parsed.npmScriptName}" tidak ditemukan di package.json server ini.`);
+        throw new Error(`Script "${parsed.npmScriptName}" was not found in package.json.`);
       }
       const innerParsed = parseSafeStartupCommand(scriptCmd, 'nodejs');
       if (innerParsed.scriptArg) {
@@ -586,16 +726,12 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
     }
   } catch (err) {
     state.status = 'error';
+    const msg = err instanceof Error ? err.message : 'Invalid startup script configuration.';
+    appendLog(serverId, 'system', `Failed to start server: ${msg}`);
+    appendLog(serverId, 'system', 'Server marked as offline...');
     emitStatus(serverId);
-    const msg = err instanceof Error ? err.message : 'Script startup tidak valid.';
-    appendLog(serverId, 'system', msg);
     throw err;
   }
-
-  state.manualStop = false;
-  state.exitCode = null;
-  state.lastCpuJiffies = undefined;
-  state.lastSampleTimeMs = undefined;
 
   // Automatically install package.json or requirements.txt before launching
   await ensureServerDependencies(server, cwd);
@@ -608,11 +744,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   state.status = 'starting';
   emitStatus(serverId);
 
-  appendLog(
-    serverId,
-    'system',
-    `Menjalankan: ${parsed.executable} ${parsed.args.join(' ')} (Port :${server.port})`
-  );
+  appendLog(serverId, 'system', `container@cmnty~ ${server.startupCommand}`);
 
   const child = spawn(launchExecutable, parsed.args, {
     cwd,
@@ -626,6 +758,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   state.pid = child.pid ?? null;
   state.startedAtMs = Date.now();
   state.status = 'running';
+  appendLog(serverId, 'system', 'Server marked as running...');
   emitStatus(serverId);
 
   child.stdin.on('error', () => {
@@ -641,38 +774,47 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   });
 
   child.on('error', (err) => {
-    appendLog(serverId, 'system', `Gagal menjalankan proses: ${err.message}`);
+    flushStreamBuffer(serverId, 'stdout');
+    flushStreamBuffer(serverId, 'stderr');
+    appendLog(serverId, 'system', `Failed to start container process: ${err.message}`);
     state.status = 'error';
     state.child = null;
     state.pid = null;
     state.startedAtMs = null;
+    appendLog(serverId, 'system', 'Server marked as offline...');
     emitStatus(serverId);
   });
 
   child.on('close', (code) => {
+    flushStreamBuffer(serverId, 'stdout');
+    flushStreamBuffer(serverId, 'stderr');
     state.child = null;
     state.pid = null;
     state.exitCode = code;
     state.cpuPercent = 0;
     state.memoryMb = 0;
     const wasManual = state.manualStop;
-    state.status = code === 0 || wasManual ? 'stopped' : 'error';
+    const wasOom = state.oomKilled;
+    state.oomKilled = false;
+    state.status = (code === 0 || wasManual) && !wasOom ? 'stopped' : 'error';
     state.startedAtMs = null;
-    appendLog(
-      serverId,
-      'system',
-      `Proses berhenti dengan kode keluar ${code ?? 'null'}.`
-    );
+
+    if (wasOom || (!wasManual && code !== 0)) {
+      appendLog(serverId, 'system', '---------- Detected server process in a crashed state! ----------');
+      appendLog(serverId, 'system', `Exit code: ${code ?? 'null'}`);
+      appendLog(serverId, 'system', `Out of memory: ${wasOom ? 'true' : 'false'}`);
+    }
+    appendLog(serverId, 'system', 'Server marked as offline...');
     emitStatus(serverId);
 
     const latestConfig = getServerById(serverId);
-    if (!wasManual && latestConfig?.autoRestart && code !== 0) {
-      appendLog(serverId, 'system', 'Auto-restart aktif: memulai ulang dalam 2 detik...');
+    if (!wasManual && latestConfig?.autoRestart && (code !== 0 || wasOom)) {
+      appendLog(serverId, 'system', 'Auto-restart enabled: rebooting server in 2 seconds...');
       setTimeout(() => {
         const current = getOrCreateState(serverId);
         if (current.status === 'error' || current.status === 'stopped') {
           startServerProcess(serverId).catch((err) => {
-            appendLog(serverId, 'system', `Auto-restart gagal: ${err.message}`);
+            appendLog(serverId, 'system', `Auto-restart failed: ${err.message}`);
           });
         }
       }, 2000);
@@ -686,9 +828,13 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
   const state = getOrCreateState(serverId);
   if (state.installChild) {
     state.manualStop = true;
+    state.status = 'stopping';
+    emitStatus(serverId);
+    appendLog(serverId, 'system', 'Server marked as stopping...');
     killProcessTree(state.installChild, forceKill ? 'SIGKILL' : 'SIGTERM');
     state.installChild = null;
     state.status = 'stopped';
+    appendLog(serverId, 'system', 'Server marked as offline...');
     emitStatus(serverId);
     return getServerMetrics(serverId);
   }
@@ -702,13 +848,15 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
   }
 
   state.manualStop = true;
+  state.status = 'stopping';
+  emitStatus(serverId);
   const child = state.child;
 
   if (forceKill) {
-    appendLog(serverId, 'system', 'Mengirim SIGKILL (Kill paksa)...');
+    appendLog(serverId, 'system', 'Server marked as killing (SIGKILL)...');
     killProcessTree(child, 'SIGKILL');
   } else {
-    appendLog(serverId, 'system', 'Mengirim SIGTERM (Menghentikan server secara aman)...');
+    appendLog(serverId, 'system', 'Server marked as stopping...');
     killProcessTree(child, 'SIGTERM');
   }
 
@@ -719,7 +867,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
     }
     const timer = setTimeout(() => {
       if (state.child) {
-        appendLog(serverId, 'system', 'Timeout shutdown tercapai, mengirim SIGKILL...');
+        appendLog(serverId, 'system', 'Server did not respond to stop signal; sending SIGKILL...');
         killProcessTree(state.child, 'SIGKILL');
       }
       resolve();
@@ -736,7 +884,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
 
 export async function restartServerProcess(serverId: string): Promise<ServerRuntimeMetrics> {
   const state = getOrCreateState(serverId);
-  if (state.child) {
+  if (state.child || state.installChild) {
     await stopServerProcess(serverId, false);
   }
   return startServerProcess(serverId);
@@ -758,21 +906,128 @@ export function sendStdinToServer(serverId: string, input: string): void {
   targetChild.stdin.write(`${input}\n`);
 }
 
-function getSystemVersions(): { pythonVersion: string | null } {
+function getSystemVersions(): {
+  osDistro: string;
+  npmVersion: string | null;
+  pythonVersion: string | null;
+  pipVersion: string | null;
+} {
   if (!globalForPm.__nodalSystemVersions) {
+    let osDistro = `${os.type()} ${os.release()}`;
+    try {
+      if (fs.existsSync('/etc/os-release')) {
+        const content = fs.readFileSync('/etc/os-release', 'utf8');
+        osDistro = parseOsPrettyName(content, osDistro);
+      }
+    } catch {
+      // fallback to os.type() + os.release()
+    }
+
+    let npmVersion: string | null = null;
+    try {
+      const npm = spawnSync('npm', ['--version'], { encoding: 'utf8', shell: false });
+      if (npm.status === 0) {
+        npmVersion = (npm.stdout || '').trim() || null;
+      }
+    } catch {
+      npmVersion = null;
+    }
+
     let pythonVersion: string | null = null;
     try {
       const py = spawnSync('python3', ['--version'], { encoding: 'utf8', shell: false });
       if (py.status === 0) {
-        pythonVersion = (py.stdout || py.stderr || '').trim().replace(/^Python\s+/i, '');
+        pythonVersion = (py.stdout || py.stderr || '').trim().replace(/^Python\s+/i, '') || null;
       }
     } catch {
       pythonVersion = null;
     }
 
-    globalForPm.__nodalSystemVersions = { pythonVersion };
+    let pipVersion: string | null = null;
+    try {
+      const pip = spawnSync('pip3', ['--version'], { encoding: 'utf8', shell: false });
+      if (pip.status === 0) {
+        const match = /pip\s+([^\s]+)/i.exec(pip.stdout || pip.stderr || '');
+        pipVersion = match ? match[1] : null;
+      } else {
+        const pyPip = spawnSync('python3', ['-m', 'pip', '--version'], {
+          encoding: 'utf8',
+          shell: false,
+        });
+        if (pyPip.status === 0) {
+          const match = /pip\s+([^\s]+)/i.exec(pyPip.stdout || pyPip.stderr || '');
+          pipVersion = match ? match[1] : null;
+        }
+      }
+    } catch {
+      pipVersion = null;
+    }
+
+    globalForPm.__nodalSystemVersions = {
+      osDistro,
+      npmVersion,
+      pythonVersion,
+      pipVersion,
+    };
   }
   return globalForPm.__nodalSystemVersions;
+}
+
+function getPrimaryIpv4Address(): string | null {
+  return '103.250.100.10';
+}
+
+function detectDiskStatsGb(): { diskTotalGb: number; diskUsedGb: number; diskFreeGb: number } {
+  try {
+    const stats = fs.statfsSync(process.cwd());
+    const bsize = Number(stats.bsize || 0);
+    const blocks = Number(stats.blocks || 0);
+    const bfree = Number(stats.bfree || 0);
+    const bavail = Number(stats.bavail || 0);
+    const gbDiv = 1024 * 1024 * 1024;
+    const totalGb = Number(((blocks * bsize) / gbDiv).toFixed(1));
+    const freeGb = Number(((bavail * bsize) / gbDiv).toFixed(1));
+    const usedGb = Number(Math.max(0, ((blocks - bfree) * bsize) / gbDiv).toFixed(1));
+    return {
+      diskTotalGb: totalGb,
+      diskUsedGb: usedGb,
+      diskFreeGb: freeGb,
+    };
+  } catch {
+    return { diskTotalGb: 0, diskUsedGb: 0, diskFreeGb: 0 };
+  }
+}
+
+function detectHostCpuPercent(load1m: number, cpuCores: number): number {
+  try {
+    if (fs.existsSync('/proc/stat')) {
+      const stat = fs.readFileSync('/proc/stat', 'utf8');
+      const current = parseProcStatCpuSnapshot(stat);
+      const prev = globalForPm.__nodalHostCpuSample ?? null;
+      if (current) {
+        globalForPm.__nodalHostCpuSample = current;
+        const deltaPct = computeCpuPercentDelta(prev, current);
+        if (deltaPct !== null) {
+          return deltaPct;
+        }
+      }
+    }
+  } catch {
+    // fallback below
+  }
+  return Number(Math.min(100, (load1m / Math.max(1, cpuCores)) * 100).toFixed(1));
+}
+
+function detectSwapMb(): { swapTotalMb: number; swapUsedMb: number; swapFreeMb: number } {
+  try {
+    if (fs.existsSync('/proc/meminfo')) {
+      const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
+      return parseMeminfoSwapMb(meminfo);
+    }
+  } catch {
+    // ignore
+  }
+  return { swapTotalMb: 0, swapUsedMb: 0, swapFreeMb: 0 };
 }
 
 function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
@@ -873,10 +1128,34 @@ function detectEffectiveCpuCores(hostCpuCount: number): number {
   return baseCores;
 }
 
+function resolveCpuModel(rawModel: string | undefined, arch: string): string {
+  const cleaned = (rawModel || '').trim();
+  if (cleaned && cleaned.toLowerCase() !== 'unknown') {
+    return cleaned;
+  }
+  try {
+    if (fs.existsSync('/proc/cpuinfo')) {
+      const cpuinfo = fs.readFileSync('/proc/cpuinfo', 'utf8');
+      const match = /^model name\s*:\s*(.+)$/m.exec(cpuinfo);
+      const parsed = match?.[1]?.trim();
+      if (parsed && parsed.toLowerCase() !== 'unknown') {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback below
+  }
+  return `Virtual CPU (${arch})`;
+}
+
 export function getHostVpsInfo(): HostVpsInfo {
   const { totalMemMb, freeMemMb } = detectEffectiveMemoryMb();
+  const swap = detectSwapMb();
+  const disk = detectDiskStatsGb();
   const cpus = os.cpus();
   const cpuCores = detectEffectiveCpuCores(cpus.length);
+  const loadAvg = os.loadavg().map((n) => Number(n.toFixed(2))) as [number, number, number];
+  const hostCpuPercent = detectHostCpuPercent(loadAvg[0], cpuCores);
   const versions = getSystemVersions();
 
   const processMap = getProcessMap();
@@ -892,6 +1171,7 @@ export function getHostVpsInfo(): HostVpsInfo {
       proc &&
       (proc.status === 'running' ||
         proc.status === 'starting' ||
+        proc.status === 'stopping' ||
         proc.status === 'installing');
     if (isActive) {
       if (proc.status === 'running') {
@@ -912,23 +1192,38 @@ export function getHostVpsInfo(): HostVpsInfo {
   );
   const availableCpuPercent = Math.max(0, totalCpuPercent - activeAllocatedCpuPercent);
 
+  const arch = os.arch();
+
   return {
     hostname: os.hostname(),
     platform: `${os.type()} ${os.release()}`,
-    arch: os.arch(),
-    cpuModel: cpus[0]?.model || 'Virtual CPU',
+    osDistro: versions.osDistro,
+    kernel: os.release(),
+    arch,
+    primaryIp: getPrimaryIpv4Address(),
+    cpuModel: resolveCpuModel(cpus[0]?.model, arch),
     cpuCores,
-    loadAvg: os.loadavg().map((n) => Number(n.toFixed(2))) as [number, number, number],
+    hostCpuPercent,
+    loadAvg,
     totalMemoryMb: totalMemMb,
     freeMemoryMb: freeMemMb,
     usedMemoryMb: Math.max(0, totalMemMb - freeMemMb),
+    swapTotalMb: swap.swapTotalMb,
+    swapUsedMb: swap.swapUsedMb,
+    swapFreeMb: swap.swapFreeMb,
+    diskTotalGb: disk.diskTotalGb,
+    diskUsedGb: disk.diskUsedGb,
+    diskFreeGb: disk.diskFreeGb,
     allocatedMemoryMb: activeAllocatedMemoryMb,
     allocatedCpuPercent: activeAllocatedCpuPercent,
     availableMemoryMb,
     availableCpuPercent,
     uptimeSeconds: Math.floor(os.uptime()),
     nodeVersion: process.version,
+    npmVersion: versions.npmVersion,
     pythonVersion: versions.pythonVersion,
+    pipVersion: versions.pipVersion,
     activeServersCount: activeCount,
+    totalServersCount: allServers.length,
   };
 }

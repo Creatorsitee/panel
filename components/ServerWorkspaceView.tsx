@@ -8,7 +8,7 @@ import { usePanel, type ServerTab } from './PanelContext';
 import ServerConsoleTab from './ServerConsoleTab';
 import ServerFilesTab from './ServerFilesTab';
 import ServerSettingsTab from './ServerSettingsTab';
-import { ShimmerBlock } from './Skeletons';
+import { ServerWorkspaceSkeleton } from './Skeletons';
 import type { ServerWithMetrics } from '@/lib/types';
 
 interface ServerWorkspaceViewProps {
@@ -66,16 +66,7 @@ export default function ServerWorkspaceView({
 
   if (!server) {
     if (loadingData || checkedServerId !== serverId) {
-      return (
-        <div className="space-y-5 max-w-5xl mx-auto">
-          <div className="space-y-2 pb-4 border-b border-zinc-200 dark:border-zinc-800">
-            <ShimmerBlock className="h-3 w-32" />
-            <ShimmerBlock className="h-6 w-56" />
-          </div>
-          <ShimmerBlock className="h-12 w-full rounded-lg" />
-          <ShimmerBlock className="h-80 w-full rounded-lg" />
-        </div>
-      );
+      return <ServerWorkspaceSkeleton tab={activeTab} />;
     }
 
     return (

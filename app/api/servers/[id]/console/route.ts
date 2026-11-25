@@ -19,44 +19,70 @@ export async function GET(
   if (access.error) return access.error;
 
   const encoder = new TextEncoder();
-  let cleanup: (() => void) | null = null;
+  let unsubscribe: (() => void) | null = null;
   let metricsTimer: ReturnType<typeof setInterval> | null = null;
   let closed = false;
 
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+    if (metricsTimer) {
+      clearInterval(metricsTimer);
+      metricsTimer = null;
+    }
+  };
+
   const stream = new ReadableStream({
     start(controller) {
-      const sendEvent = (event: string, data: unknown) => {
+      if (req.signal.aborted) {
+        cleanup();
+        try {
+          controller.close();
+        } catch {
+          // ignore already closed
+        }
+        return;
+      }
+
+      const sendRaw = (chunk: string) => {
         if (closed) return;
         try {
-          controller.enqueue(
-            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-          );
+          controller.enqueue(encoder.encode(chunk));
         } catch {
-          cleanup?.();
+          cleanup();
         }
       };
 
+      const sendEvent = (event: string, data: unknown) => {
+        sendRaw(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      sendRaw(': connected\n\n');
       sendEvent('history', getConsoleHistory(id));
       sendEvent('metrics', getServerMetrics(id));
 
-      const unsubscribe = subscribeConsole(
+      unsubscribe = subscribeConsole(
         id,
         (line) => sendEvent('log', line),
-        (metrics) => sendEvent('metrics', metrics)
+        (metrics) => sendEvent('metrics', metrics),
+        () => sendEvent('clear', { clearedAt: Date.now() })
       );
 
+      let tickCount = 0;
       metricsTimer = setInterval(() => {
+        tickCount += 1;
+        if (tickCount % 15 === 0) {
+          sendRaw(': ping\n\n');
+        }
         sendEvent('metrics', getServerMetrics(id));
       }, 1000);
 
-      cleanup = () => {
-        closed = true;
-        unsubscribe();
-        if (metricsTimer) clearInterval(metricsTimer);
-      };
-
       req.signal.addEventListener('abort', () => {
-        cleanup?.();
+        cleanup();
         try {
           controller.close();
         } catch {
@@ -65,7 +91,7 @@ export async function GET(
       });
     },
     cancel() {
-      cleanup?.();
+      cleanup();
     },
   });
 

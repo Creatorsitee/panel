@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   ArrowRightLeft,
   Pencil,
   Play,
   Plus,
+  RotateCw,
   Search,
   Server,
   Shield,
@@ -16,8 +18,18 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { apiFetch } from './api-client';
-import { ShimmerBlock } from './Skeletons';
+import { ApiError, apiFetch, buildAuthHeaders } from './api-client';
+import CreateServerModal from './CreateServerModal';
+import { AdminTableSkeleton, ShimmerBlock } from './Skeletons';
+import { connectSseStream } from '@/lib/sse-client';
+import {
+  computeAdminOverview,
+  filterAdminServers,
+  filterAdminUsers,
+  getAdminUserDeleteBlockReason,
+  isBusyServerStatus,
+  type AdminStatusFilter,
+} from '@/lib/admin-utils';
 import {
   showConfirmDialog,
   showErrorAlert,
@@ -34,12 +46,11 @@ import type {
 } from '@/lib/types';
 
 interface AdminPanelTabProps {
+  section: 'users' | 'servers';
   currentUser: PublicUser;
   onOpenServer: (serverId: string) => void;
   onWorkspaceRefresh: () => void;
 }
-
-type AdminSection = 'users' | 'servers';
 
 function formatDate(iso: string): string {
   try {
@@ -54,11 +65,11 @@ function formatDate(iso: string): string {
 }
 
 export default function AdminPanelTab({
+  section,
   currentUser,
   onOpenServer,
   onWorkspaceRefresh,
 }: AdminPanelTabProps) {
-  const [section, setSection] = useState<AdminSection>('users');
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [servers, setServers] = useState<AdminServerSummary[]>([]);
   const [hostInfo, setHostInfo] = useState<HostVpsInfo | null>(null);
@@ -68,7 +79,7 @@ export default function AdminPanelTab({
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
 
   const [serverSearch, setServerSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'stopped' | 'error'>('all');
+  const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('all');
 
   // Create User Modal
   const [createUserOpen, setCreateUserOpen] = useState(false);
@@ -85,6 +96,9 @@ export default function AdminPanelTab({
   const [editRole, setEditRole] = useState<UserRole>('user');
   const [editPassword, setEditPassword] = useState('');
 
+  // Create Server Modal (Admin)
+  const [createServerOpen, setCreateServerOpen] = useState(false);
+
   // Transfer Server Ownership Modal
   const [transferServer, setTransferServer] = useState<AdminServerSummary | null>(null);
   const [transferOwnerId, setTransferOwnerId] = useState('');
@@ -93,82 +107,121 @@ export default function AdminPanelTab({
   // Per-server busy state for quick actions
   const [busyServerId, setBusyServerId] = useState<string | null>(null);
 
-  const loadAdminData = useCallback(async () => {
-    try {
-      const [usersRes, serversRes] = await Promise.all([
-        apiFetch<{ users: AdminUserSummary[] }>('/api/admin/users'),
-        apiFetch<{ servers: AdminServerSummary[]; host: HostVpsInfo }>('/api/admin/servers'),
-      ]);
-      setUsers(usersRes.users);
-      setServers(serversRes.servers);
-      setHostInfo(serversRes.host);
-    } catch (err) {
-      void showErrorToast(
-        'Gagal Memuat Data Admin',
-        err instanceof Error ? err.message : 'Terjadi kesalahan saat mengambil data admin.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadAdminData = useCallback(
+    async (options: { background?: boolean } = {}) => {
+      try {
+        const [usersRes, serversRes] = await Promise.all([
+          apiFetch<{ users: AdminUserSummary[] }>('/api/admin/users'),
+          apiFetch<{ servers: AdminServerSummary[]; host: HostVpsInfo }>('/api/admin/servers'),
+        ]);
+        setUsers(usersRes.users);
+        setServers(serversRes.servers);
+        setHostInfo(serversRes.host);
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          onWorkspaceRefresh();
+          return;
+        }
+        if (!options.background) {
+          void showErrorToast(
+            'Gagal Memuat Data Admin',
+            err instanceof Error ? err.message : 'Terjadi kesalahan saat mengambil data admin.'
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onWorkspaceRefresh]
+  );
 
   useEffect(() => {
     let active = true;
-    const runFetch = async () => {
-      if (!active) return;
-      await loadAdminData();
-    };
-    void runFetch();
-    const timer = setInterval(() => {
-      void runFetch();
-    }, 5000);
+
+    const disconnect = connectSseStream({
+      url: '/api/stream?scope=admin',
+      getHeaders: buildAuthHeaders,
+      onEvent: (eventName, payload) => {
+        if (!active) return;
+        if (eventName === 'auth-error') {
+          setLoading(false);
+          onWorkspaceRefresh();
+          return;
+        }
+        if (eventName === 'snapshot' && payload && typeof payload === 'object') {
+          const data = payload as {
+            users?: AdminUserSummary[];
+            servers?: AdminServerSummary[];
+            host?: HostVpsInfo;
+          };
+          if (Array.isArray(data.users)) {
+            setUsers(data.users);
+          }
+          if (Array.isArray(data.servers)) {
+            setServers(data.servers);
+          }
+          if (data.host) {
+            setHostInfo(data.host);
+          }
+          setLoading(false);
+        }
+      },
+      onHttpError: (status) => {
+        if (!active) return;
+        setLoading(false);
+        if (status === 401 || status === 403) {
+          onWorkspaceRefresh();
+        } else {
+          void showErrorToast(
+            'Gagal Memuat Data Admin',
+            'Terjadi kesalahan saat menghubungkan stream data admin.'
+          );
+        }
+      },
+    });
+
     return () => {
       active = false;
-      clearInterval(timer);
+      disconnect();
     };
-  }, [loadAdminData]);
+  }, [onWorkspaceRefresh]);
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((u) => {
-      if (roleFilter !== 'all' && u.role !== roleFilter) return false;
-      if (userSearch.trim()) {
-        const q = userSearch.toLowerCase();
-        return (
-          u.name.toLowerCase().includes(q) ||
-          u.email.toLowerCase().includes(q) ||
-          u.id.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [users, roleFilter, userSearch]);
+  useEffect(() => {
+    const hasOpenModal = createUserOpen || Boolean(editingUser) || Boolean(transferServer);
+    if (!hasOpenModal) return;
 
-  const filteredServers = useMemo(() => {
-    return servers.filter((srv) => {
-      if (statusFilter !== 'all' && srv.metrics.status !== statusFilter) return false;
-      if (serverSearch.trim()) {
-        const q = serverSearch.toLowerCase();
-        return (
-          srv.name.toLowerCase().includes(q) ||
-          srv.ownerName.toLowerCase().includes(q) ||
-          srv.ownerEmail.toLowerCase().includes(q) ||
-          String(srv.port).includes(q)
-        );
-      }
-      return true;
-    });
-  }, [servers, statusFilter, serverSearch]);
-
-  const stats = useMemo(() => {
-    const adminCount = users.filter((u) => u.role === 'admin').length;
-    const runningCount = servers.filter((s) => s.metrics.status === 'running').length;
-    return {
-      totalUsers: users.length,
-      adminCount,
-      totalServers: servers.length,
-      runningCount,
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (createUserOpen && !savingUser) setCreateUserOpen(false);
+      if (editingUser && !savingUser) setEditingUser(null);
+      if (transferServer && !transferring) setTransferServer(null);
     };
-  }, [users, servers]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [createUserOpen, editingUser, transferServer, savingUser, transferring]);
+
+  const filteredUsers = useMemo(
+    () => filterAdminUsers(users, { search: userSearch, roleFilter }),
+    [users, roleFilter, userSearch]
+  );
+
+  const filteredServers = useMemo(
+    () => filterAdminServers(servers, { search: serverSearch, statusFilter }),
+    [servers, statusFilter, serverSearch]
+  );
+
+  const stats = useMemo(
+    () => computeAdminOverview(users, servers),
+    [users, servers]
+  );
+
+  function openCreateUserModal() {
+    setNewName('');
+    setNewEmail('');
+    setNewPassword('');
+    setNewRole('user');
+    setCreateUserOpen(true);
+  }
 
   async function handleCreateUser(e: React.FormEvent) {
     e.preventDefault();
@@ -183,7 +236,11 @@ export default function AdminPanelTab({
           role: newRole,
         }),
       });
-      setUsers((prev) => [...prev, res.user]);
+      setUsers((prev) =>
+        prev.some((u) => u.id === res.user.id)
+          ? prev.map((u) => (u.id === res.user.id ? res.user : u))
+          : [...prev, res.user]
+      );
       setCreateUserOpen(false);
       setNewName('');
       setNewEmail('');
@@ -228,7 +285,8 @@ export default function AdminPanelTab({
       setUsers((prev) => prev.map((u) => (u.id === res.user.id ? res.user : u)));
       setEditingUser(null);
       void showSuccessToast('User diperbarui', res.user.email);
-      void loadAdminData();
+      await loadAdminData({ background: true });
+      onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
         'Gagal Memperbarui User',
@@ -240,6 +298,16 @@ export default function AdminPanelTab({
   }
 
   async function handleDeleteUser(user: AdminUserSummary) {
+    const blockReason = getAdminUserDeleteBlockReason(
+      user,
+      currentUser.id,
+      stats.adminCount
+    );
+    if (blockReason) {
+      await showErrorAlert('Tidak Dapat Menghapus User', blockReason);
+      return;
+    }
+
     const confirmed = await showConfirmDialog({
       title: `Hapus user "${user.name}"?`,
       text:
@@ -255,7 +323,7 @@ export default function AdminPanelTab({
     try {
       await apiFetch(`/api/admin/users/${user.id}`, { method: 'DELETE' });
       void showSuccessToast('User dihapus', user.email);
-      await loadAdminData();
+      await loadAdminData({ background: true });
       onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
@@ -267,7 +335,7 @@ export default function AdminPanelTab({
 
   async function handlePowerAction(
     serverId: string,
-    action: 'start' | 'stop' | 'kill'
+    action: 'start' | 'restart' | 'stop' | 'kill'
   ) {
     setBusyServerId(serverId);
     try {
@@ -275,14 +343,20 @@ export default function AdminPanelTab({
         method: 'POST',
         body: JSON.stringify({ action }),
       });
-      void showInfoToast(
+      const toastText =
         action === 'start'
           ? 'Server dijalankan'
+          : action === 'restart'
+          ? 'Server di-restart'
           : action === 'stop'
           ? 'Server dihentikan'
-          : 'Proses dihentikan paksa'
-      );
-      await loadAdminData();
+          : 'Proses dihentikan paksa';
+      if (action === 'start' || action === 'restart') {
+        void showSuccessToast(toastText);
+      } else {
+        void showInfoToast(toastText);
+      }
+      await loadAdminData({ background: true });
       onWorkspaceRefresh();
     } catch (err) {
       void showErrorToast(
@@ -308,7 +382,7 @@ export default function AdminPanelTab({
     try {
       await apiFetch(`/api/servers/${srv.id}`, { method: 'DELETE' });
       void showSuccessToast('Server dihapus', srv.name);
-      await loadAdminData();
+      await loadAdminData({ background: true });
       onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
@@ -322,7 +396,9 @@ export default function AdminPanelTab({
 
   async function handleTransferServer(e: React.FormEvent) {
     e.preventDefault();
-    if (!transferServer || !transferOwnerId) return;
+    if (!transferServer || !transferOwnerId || transferOwnerId === transferServer.ownerId) {
+      return;
+    }
     setTransferring(true);
     try {
       await apiFetch(`/api/servers/${transferServer.id}`, {
@@ -331,7 +407,7 @@ export default function AdminPanelTab({
       });
       setTransferServer(null);
       void showSuccessToast('Kepemilikan dipindahkan');
-      await loadAdminData();
+      await loadAdminData({ background: true });
       onWorkspaceRefresh();
     } catch (err) {
       await showErrorAlert(
@@ -353,43 +429,43 @@ export default function AdminPanelTab({
             <span>Administrator</span>
           </div>
           <h1 className="text-xl font-bold tracking-tight mt-0.5 text-zinc-900 dark:text-zinc-100">
-            Panel Admin
+            {section === 'users' ? 'Kelola User' : 'Kelola Server'}
           </h1>
         </div>
 
-        <div
-          className="w-full sm:w-auto flex items-center gap-1 p-1 rounded bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800"
-          role="tablist"
-          aria-label="Bagian Panel Admin"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={section === 'users'}
-            onClick={() => setSection('users')}
-            className={`flex-1 sm:flex-initial justify-center h-8 px-2.5 sm:px-3 rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-              section === 'users'
-                ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
-            }`}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div
+            className="flex-1 sm:flex-initial flex items-center gap-1 p-1 rounded bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800"
+            role="tablist"
+            aria-label="Bagian Panel Admin"
           >
-            <Users className="w-3.5 h-3.5 shrink-0" />
-            <span>User ({stats.totalUsers})</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={section === 'servers'}
-            onClick={() => setSection('servers')}
-            className={`flex-1 sm:flex-initial justify-center h-8 px-2.5 sm:px-3 rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-              section === 'servers'
-                ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
-            }`}
-          >
-            <Server className="w-3.5 h-3.5 shrink-0" />
-            <span>Server ({stats.totalServers})</span>
-          </button>
+            <Link
+              href="/admin/user"
+              role="tab"
+              aria-selected={section === 'users'}
+              className={`flex-1 sm:flex-initial justify-center h-8 px-2.5 sm:px-3 rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                section === 'users'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 shrink-0" />
+              <span>User ({stats.totalUsers})</span>
+            </Link>
+            <Link
+              href="/admin/server"
+              role="tab"
+              aria-selected={section === 'servers'}
+              className={`flex-1 sm:flex-initial justify-center h-8 px-2.5 sm:px-3 rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                section === 'servers'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              <Server className="w-3.5 h-3.5 shrink-0" />
+              <span>Server ({stats.totalServers})</span>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -397,42 +473,79 @@ export default function AdminPanelTab({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-3.5 min-w-0">
           <div className="text-[11px] text-zinc-500 truncate">Total Akun</div>
-          <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
-            {loading ? '—' : stats.totalUsers}
-          </div>
-          <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-            {stats.adminCount} Admin · {Math.max(0, stats.totalUsers - stats.adminCount)} User
-          </div>
+          {loading ? (
+            <div className="space-y-1.5 mt-1.5">
+              <ShimmerBlock className="h-6 w-12" />
+              <ShimmerBlock className="h-3 w-28" />
+            </div>
+          ) : (
+            <>
+              <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
+                {stats.totalUsers}
+              </div>
+              <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                {stats.adminCount} Admin · {stats.regularUserCount} User
+              </div>
+            </>
+          )}
         </div>
 
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-3.5 min-w-0">
           <div className="text-[11px] text-zinc-500 truncate">Total Server</div>
-          <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
-            {loading ? '—' : stats.totalServers}
-          </div>
-          <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-            {stats.runningCount} Berjalan
-          </div>
+          {loading ? (
+            <div className="space-y-1.5 mt-1.5">
+              <ShimmerBlock className="h-6 w-12" />
+              <ShimmerBlock className="h-3 w-24" />
+            </div>
+          ) : (
+            <>
+              <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
+                {stats.totalServers}
+              </div>
+              <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                {stats.runningCount} Berjalan
+                {stats.errorCount > 0 ? ` · ${stats.errorCount} Error` : ''}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-3.5 min-w-0">
           <div className="text-[11px] text-zinc-500 truncate">Alokasi Memori Aktif</div>
-          <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
-            {hostInfo ? `${hostInfo.allocatedMemoryMb} MB` : '—'}
-          </div>
-          <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-            {hostInfo ? `Tersedia ${hostInfo.availableMemoryMb} MB` : '—'}
-          </div>
+          {loading && !hostInfo ? (
+            <div className="space-y-1.5 mt-1.5">
+              <ShimmerBlock className="h-6 w-20" />
+              <ShimmerBlock className="h-3 w-28" />
+            </div>
+          ) : (
+            <>
+              <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
+                {hostInfo ? `${hostInfo.allocatedMemoryMb} MB` : '—'}
+              </div>
+              <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                {hostInfo ? `Tersedia ${hostInfo.availableMemoryMb} MB` : '—'}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-3.5 min-w-0">
           <div className="text-[11px] text-zinc-500 truncate">Alokasi CPU Aktif</div>
-          <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
-            {hostInfo ? `${hostInfo.allocatedCpuPercent}%` : '—'}
-          </div>
-          <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-            {hostInfo ? `Tersedia ${hostInfo.availableCpuPercent}%` : '—'}
-          </div>
+          {loading && !hostInfo ? (
+            <div className="space-y-1.5 mt-1.5">
+              <ShimmerBlock className="h-6 w-16" />
+              <ShimmerBlock className="h-3 w-24" />
+            </div>
+          ) : (
+            <>
+              <div className="text-lg font-bold font-mono mt-0.5 text-zinc-900 dark:text-zinc-100 truncate">
+                {hostInfo ? `${hostInfo.allocatedCpuPercent}%` : '—'}
+              </div>
+              <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                {hostInfo ? `Tersedia ${hostInfo.availableCpuPercent}%` : '—'}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -472,7 +585,7 @@ export default function AdminPanelTab({
 
             <button
               type="button"
-              onClick={() => setCreateUserOpen(true)}
+              onClick={openCreateUserModal}
               className="w-full sm:w-auto h-9 px-3.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
             >
               <UserPlus className="w-3.5 h-3.5" />
@@ -482,11 +595,7 @@ export default function AdminPanelTab({
 
           <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-[#0C0C0E]">
             {loading ? (
-              <div className="p-4 space-y-3">
-                {[0, 1, 2].map((i) => (
-                  <ShimmerBlock key={i} className="h-10 w-full" />
-                ))}
-              </div>
+              <AdminTableSkeleton section="users" />
             ) : filteredUsers.length === 0 ? (
               <div className="p-10 text-center text-xs text-zinc-500">
                 Tidak ada user yang cocok dengan filter.
@@ -497,6 +606,11 @@ export default function AdminPanelTab({
                 <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800/70">
                   {filteredUsers.map((u) => {
                     const isSelf = u.id === currentUser.id;
+                    const deleteBlockReason = getAdminUserDeleteBlockReason(
+                      u,
+                      currentUser.id,
+                      stats.adminCount
+                    );
                     return (
                       <div key={u.id} className="p-3.5 space-y-3">
                         <div className="flex items-start justify-between gap-2">
@@ -540,8 +654,9 @@ export default function AdminPanelTab({
                             </button>
                             <button
                               type="button"
-                              disabled={isSelf}
+                              disabled={Boolean(deleteBlockReason)}
                               onClick={() => handleDeleteUser(u)}
+                              title={deleteBlockReason || 'Hapus user beserta server miliknya'}
                               aria-label={`Hapus ${u.name}`}
                               className="h-7 px-2.5 rounded border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-35 disabled:cursor-not-allowed text-xs inline-flex items-center gap-1 cursor-pointer"
                             >
@@ -570,6 +685,11 @@ export default function AdminPanelTab({
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
                       {filteredUsers.map((u) => {
                         const isSelf = u.id === currentUser.id;
+                        const deleteBlockReason = getAdminUserDeleteBlockReason(
+                          u,
+                          currentUser.id,
+                          stats.adminCount
+                        );
                         return (
                           <tr
                             key={u.id}
@@ -617,13 +737,9 @@ export default function AdminPanelTab({
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={isSelf}
+                                  disabled={Boolean(deleteBlockReason)}
                                   onClick={() => handleDeleteUser(u)}
-                                  title={
-                                    isSelf
-                                      ? 'Tidak dapat menghapus akun sendiri'
-                                      : 'Hapus user beserta server miliknya'
-                                  }
+                                  title={deleteBlockReason || 'Hapus user beserta server miliknya'}
                                   aria-label={`Hapus ${u.name}`}
                                   className="h-7 px-2.5 rounded border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-35 disabled:cursor-not-allowed inline-flex items-center gap-1 cursor-pointer"
                                 >
@@ -644,50 +760,59 @@ export default function AdminPanelTab({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative w-full sm:flex-1 sm:max-w-sm">
-              <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="search"
-                aria-label="Cari semua server"
-                value={serverSearch}
-                onChange={(e) => setServerSearch(e.target.value)}
-                placeholder="Cari server, pemilik, atau port..."
-                className="w-full h-9 pl-8 pr-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
-              />
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+              <div className="relative w-full sm:flex-1 sm:max-w-sm">
+                <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="search"
+                  aria-label="Cari semua server"
+                  value={serverSearch}
+                  onChange={(e) => setServerSearch(e.target.value)}
+                  placeholder="Cari server, pemilik, atau port..."
+                  className="w-full h-9 pl-8 pr-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
+                />
+              </div>
+
+              <div className="w-full sm:w-auto flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded">
+                {(
+                  [
+                    { id: 'all', label: 'Semua' },
+                    { id: 'running', label: 'Running' },
+                    { id: 'busy', label: 'Starting' },
+                    { id: 'stopped', label: 'Stopped' },
+                    { id: 'error', label: 'Error' },
+                  ] as const
+                ).map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setStatusFilter(st.id)}
+                    className={`flex-1 sm:flex-initial h-7 px-2.5 text-xs font-medium rounded transition-colors cursor-pointer text-center whitespace-nowrap ${
+                      statusFilter === st.id
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="w-full sm:w-auto flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded">
-              {(['all', 'running', 'stopped', 'error'] as const).map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setStatusFilter(st)}
-                  className={`flex-1 sm:flex-initial h-7 px-2.5 text-xs font-medium rounded transition-colors cursor-pointer text-center ${
-                    statusFilter === st
-                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs'
-                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
-                  }`}
-                >
-                  {st === 'all'
-                    ? 'Semua'
-                    : st === 'running'
-                    ? 'Running'
-                    : st === 'stopped'
-                    ? 'Stopped'
-                    : 'Error'}
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => setCreateServerOpen(true)}
+              className="w-full lg:w-auto h-9 px-3.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Buat Server</span>
+            </button>
           </div>
 
           <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-[#0C0C0E]">
             {loading ? (
-              <div className="p-4 space-y-3">
-                {[0, 1, 2].map((i) => (
-                  <ShimmerBlock key={i} className="h-12 w-full" />
-                ))}
-              </div>
+              <AdminTableSkeleton section="servers" />
             ) : filteredServers.length === 0 ? (
               <div className="p-10 text-center text-xs text-zinc-500">
                 Tidak ada server yang ditemukan.
@@ -698,28 +823,27 @@ export default function AdminPanelTab({
                 <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800/70">
                   {filteredServers.map((srv) => {
                     const isRunning = srv.metrics.status === 'running';
-                    const isBusy =
-                      srv.metrics.status === 'installing' ||
-                      srv.metrics.status === 'starting';
+                    const isBusy = isBusyServerStatus(srv.metrics.status);
                     const rowBusy = busyServerId === srv.id;
+                    const serverHref = `/server/${encodeURIComponent(srv.id)}`;
 
                     return (
                       <div key={srv.id} className="p-3.5 space-y-3">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <button
-                              type="button"
+                            <Link
+                              href={serverHref}
                               onClick={() => onOpenServer(srv.id)}
                               className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 hover:underline text-left cursor-pointer truncate block max-w-full"
                             >
                               {srv.name}
-                            </button>
+                            </Link>
                             <div className="text-[11px] font-mono text-zinc-500 truncate mt-0.5">
                               {srv.runtime} · :{srv.port} · {srv.startupCommand}
                             </div>
                           </div>
                           <span
-                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase border shrink-0 ${
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase border shrink-0 ${
                               isRunning
                                 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                                 : srv.metrics.status === 'error'
@@ -769,7 +893,17 @@ export default function AdminPanelTab({
                             <>
                               <button
                                 type="button"
-                                disabled={rowBusy}
+                                disabled={rowBusy || isBusy}
+                                onClick={() => handlePowerAction(srv.id, 'restart')}
+                                title="Restart server"
+                                aria-label={`Restart ${srv.name}`}
+                                className="w-7 h-7 rounded border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                              >
+                                <RotateCw className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={rowBusy || srv.metrics.status === 'stopping'}
                                 onClick={() => handlePowerAction(srv.id, 'stop')}
                                 title="Stop server"
                                 aria-label={`Stop ${srv.name}`}
@@ -792,23 +926,24 @@ export default function AdminPanelTab({
                           )}
                           <button
                             type="button"
+                            disabled={rowBusy}
                             onClick={() => {
                               setTransferServer(srv);
                               setTransferOwnerId(srv.ownerId);
                             }}
                             title="Pindah pemilik"
                             aria-label={`Pindah pemilik ${srv.name}`}
-                            className="w-7 h-7 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center cursor-pointer"
+                            className="w-7 h-7 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 flex items-center justify-center cursor-pointer"
                           >
                             <ArrowRightLeft className="w-3 h-3" />
                           </button>
-                          <button
-                            type="button"
+                          <Link
+                            href={serverHref}
                             onClick={() => onOpenServer(srv.id)}
-                            className="h-7 px-2.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium cursor-pointer"
+                            className="h-7 px-2.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium inline-flex items-center"
                           >
                             Kelola
-                          </button>
+                          </Link>
                           <button
                             type="button"
                             disabled={rowBusy}
@@ -827,151 +962,175 @@ export default function AdminPanelTab({
 
                 {/* Desktop Server Table */}
                 <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 text-[11px] uppercase tracking-wider text-zinc-500">
-                      <th className="py-2.5 px-4 font-semibold">Server</th>
-                      <th className="py-2.5 px-4 font-semibold">Pemilik</th>
-                      <th className="py-2.5 px-4 font-semibold">Resource</th>
-                      <th className="py-2.5 px-4 font-semibold">Status</th>
-                      <th className="py-2.5 px-4 font-semibold text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
-                    {filteredServers.map((srv) => {
-                      const isRunning = srv.metrics.status === 'running';
-                      const isBusy =
-                        srv.metrics.status === 'installing' ||
-                        srv.metrics.status === 'starting';
-                      const rowBusy = busyServerId === srv.id;
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 text-[11px] uppercase tracking-wider text-zinc-500">
+                        <th className="py-2.5 px-4 font-semibold">Server</th>
+                        <th className="py-2.5 px-4 font-semibold">Pemilik</th>
+                        <th className="py-2.5 px-4 font-semibold">Resource</th>
+                        <th className="py-2.5 px-4 font-semibold">Status</th>
+                        <th className="py-2.5 px-4 font-semibold text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
+                      {filteredServers.map((srv) => {
+                        const isRunning = srv.metrics.status === 'running';
+                        const isBusy = isBusyServerStatus(srv.metrics.status);
+                        const rowBusy = busyServerId === srv.id;
+                        const serverHref = `/server/${encodeURIComponent(srv.id)}`;
 
-                      return (
-                        <tr
-                          key={srv.id}
-                          className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 transition-colors"
-                        >
-                          <td className="py-3 px-4">
-                            <button
-                              type="button"
-                              onClick={() => onOpenServer(srv.id)}
-                              className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline text-left cursor-pointer"
-                            >
-                              {srv.name}
-                            </button>
-                            <div className="text-[11px] font-mono text-zinc-500">
-                              {srv.runtime} · :{srv.port} · {srv.startupCommand}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                              {srv.ownerName}
-                            </div>
-                            <div className="text-[11px] font-mono text-zinc-500">
-                              {srv.ownerEmail}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 font-mono text-[11px] text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                            <div>
-                              {srv.metrics.memoryMb.toFixed(0)} / {srv.memoryLimitMb} MB
-                            </div>
-                            <div>
-                              CPU {srv.metrics.cpuPercent.toFixed(1)}% / {srv.cpuLimitPercent}%
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase border ${
-                                isRunning
-                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                                  : srv.metrics.status === 'error'
-                                  ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30'
-                                  : isBusy
-                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                                  : 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-500/30'
-                              }`}
-                            >
-                              {srv.metrics.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center justify-end gap-1">
-                              {!isRunning && !isBusy ? (
+                        return (
+                          <tr
+                            key={srv.id}
+                            className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 transition-colors"
+                          >
+                            <td className="py-3 px-4">
+                              <Link
+                                href={serverHref}
+                                onClick={() => onOpenServer(srv.id)}
+                                className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline text-left cursor-pointer"
+                              >
+                                {srv.name}
+                              </Link>
+                              <div className="text-[11px] font-mono text-zinc-500">
+                                {srv.runtime} · :{srv.port} · {srv.startupCommand}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-medium text-zinc-800 dark:text-zinc-200">
+                                {srv.ownerName}
+                              </div>
+                              <div className="text-[11px] font-mono text-zinc-500">
+                                {srv.ownerEmail}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 font-mono text-[11px] text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
+                              <div>
+                                {srv.metrics.memoryMb.toFixed(0)} / {srv.memoryLimitMb} MB
+                              </div>
+                              <div>
+                                CPU {srv.metrics.cpuPercent.toFixed(1)}% / {srv.cpuLimitPercent}%
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase border ${
+                                  isRunning
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                    : srv.metrics.status === 'error'
+                                    ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30'
+                                    : isBusy
+                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                    : 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-500/30'
+                                }`}
+                              >
+                                {srv.metrics.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center justify-end gap-1">
+                                {!isRunning && !isBusy ? (
+                                  <button
+                                    type="button"
+                                    disabled={rowBusy}
+                                    onClick={() => handlePowerAction(srv.id, 'start')}
+                                    title="Start server"
+                                    aria-label={`Start ${srv.name}`}
+                                    className="w-7 h-7 rounded border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                                  >
+                                    <Play className="w-3 h-3" />
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={rowBusy || isBusy}
+                                      onClick={() => handlePowerAction(srv.id, 'restart')}
+                                      title="Restart server"
+                                      aria-label={`Restart ${srv.name}`}
+                                      className="w-7 h-7 rounded border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                                    >
+                                      <RotateCw className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={rowBusy || srv.metrics.status === 'stopping'}
+                                      onClick={() => handlePowerAction(srv.id, 'stop')}
+                                      title="Stop server"
+                                      aria-label={`Stop ${srv.name}`}
+                                      className="w-7 h-7 rounded border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                                    >
+                                      <Square className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={rowBusy}
+                                      onClick={() => handlePowerAction(srv.id, 'kill')}
+                                      title="Kill paksa"
+                                      aria-label={`Kill ${srv.name}`}
+                                      className="w-7 h-7 rounded border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                                    >
+                                      <Skull className="w-3 h-3" />
+                                    </button>
+                                  </>
+                                )}
                                 <button
                                   type="button"
                                   disabled={rowBusy}
-                                  onClick={() => handlePowerAction(srv.id, 'start')}
-                                  title="Start server"
-                                  aria-label={`Start ${srv.name}`}
-                                  className="w-7 h-7 rounded border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                                  onClick={() => {
+                                    setTransferServer(srv);
+                                    setTransferOwnerId(srv.ownerId);
+                                  }}
+                                  title="Pindah pemilik"
+                                  aria-label={`Pindah pemilik ${srv.name}`}
+                                  className="w-7 h-7 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 flex items-center justify-center cursor-pointer"
                                 >
-                                  <Play className="w-3 h-3" />
+                                  <ArrowRightLeft className="w-3 h-3" />
                                 </button>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    disabled={rowBusy}
-                                    onClick={() => handlePowerAction(srv.id, 'stop')}
-                                    title="Stop server"
-                                    aria-label={`Stop ${srv.name}`}
-                                    className="w-7 h-7 rounded border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 flex items-center justify-center cursor-pointer"
-                                  >
-                                    <Square className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={rowBusy}
-                                    onClick={() => handlePowerAction(srv.id, 'kill')}
-                                    title="Kill paksa"
-                                    aria-label={`Kill ${srv.name}`}
-                                    className="w-7 h-7 rounded border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
-                                  >
-                                    <Skull className="w-3 h-3" />
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setTransferServer(srv);
-                                  setTransferOwnerId(srv.ownerId);
-                                }}
-                                title="Pindah pemilik"
-                                aria-label={`Pindah pemilik ${srv.name}`}
-                                className="w-7 h-7 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center cursor-pointer"
-                              >
-                                <ArrowRightLeft className="w-3 h-3" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onOpenServer(srv.id)}
-                                className="h-7 px-2.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium cursor-pointer"
-                              >
-                                Kelola
-                              </button>
-                              <button
-                                type="button"
-                                disabled={rowBusy}
-                                onClick={() => handleDeleteServer(srv)}
-                                title="Hapus server"
-                                aria-label={`Hapus ${srv.name}`}
-                                className="w-7 h-7 rounded border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                                <Link
+                                  href={serverHref}
+                                  onClick={() => onOpenServer(srv.id)}
+                                  className="h-7 px-2.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium inline-flex items-center"
+                                >
+                                  Kelola
+                                </Link>
+                                <button
+                                  type="button"
+                                  disabled={rowBusy}
+                                  onClick={() => handleDeleteServer(srv)}
+                                  title="Hapus server"
+                                  aria-label={`Hapus ${srv.name}`}
+                                  className="w-7 h-7 rounded border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </>
             )}
           </div>
         </div>
       )}
+
+      {/* Create Server Modal (Admin with Owner Selection) */}
+      <CreateServerModal
+        open={createServerOpen}
+        hostInfo={hostInfo}
+        isAdmin
+        currentUserId={currentUser.id}
+        users={users}
+        onClose={() => setCreateServerOpen(false)}
+        onCreated={() => {
+          void loadAdminData({ background: true });
+          onWorkspaceRefresh();
+        }}
+      />
 
       {/* Create User Modal */}
       {createUserOpen && (
@@ -980,6 +1139,9 @@ export default function AdminPanelTab({
           role="dialog"
           aria-modal="true"
           aria-labelledby="admin-create-user-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !savingUser) setCreateUserOpen(false);
+          }}
         >
           <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
             <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
@@ -988,8 +1150,10 @@ export default function AdminPanelTab({
               </h2>
               <button
                 type="button"
+                disabled={savingUser}
                 onClick={() => setCreateUserOpen(false)}
-                className="w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shrink-0"
+                aria-label="Tutup modal tambah user"
+                className="w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shrink-0 disabled:opacity-50"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1054,8 +1218,9 @@ export default function AdminPanelTab({
               <div className="pt-2 flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800">
                 <button
                   type="button"
+                  disabled={savingUser}
                   onClick={() => setCreateUserOpen(false)}
-                  className="h-9 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs font-medium cursor-pointer"
+                  className="h-9 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs font-medium cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
@@ -1080,6 +1245,9 @@ export default function AdminPanelTab({
           role="dialog"
           aria-modal="true"
           aria-labelledby="admin-edit-user-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !savingUser) setEditingUser(null);
+          }}
         >
           <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
             <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
@@ -1088,8 +1256,10 @@ export default function AdminPanelTab({
               </h2>
               <button
                 type="button"
+                disabled={savingUser}
                 onClick={() => setEditingUser(null)}
-                className="w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shrink-0"
+                aria-label="Tutup modal edit user"
+                className="w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shrink-0 disabled:opacity-50"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1154,8 +1324,9 @@ export default function AdminPanelTab({
               <div className="pt-2 flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800">
                 <button
                   type="button"
+                  disabled={savingUser}
                   onClick={() => setEditingUser(null)}
-                  className="h-9 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs font-medium cursor-pointer"
+                  className="h-9 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs font-medium cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
@@ -1179,6 +1350,9 @@ export default function AdminPanelTab({
           role="dialog"
           aria-modal="true"
           aria-labelledby="admin-transfer-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !transferring) setTransferServer(null);
+          }}
         >
           <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
             <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
@@ -1187,13 +1361,21 @@ export default function AdminPanelTab({
               </h2>
               <button
                 type="button"
+                disabled={transferring}
                 onClick={() => setTransferServer(null)}
-                className="w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shrink-0"
+                aria-label="Tutup modal pindah pemilik"
+                className="w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shrink-0 disabled:opacity-50"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <form onSubmit={handleTransferServer} className="p-4 sm:p-5 space-y-4">
+              <div className="text-xs text-zinc-500">
+                Pemilik saat ini:{' '}
+                <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                  {transferServer.ownerName} ({transferServer.ownerEmail})
+                </span>
+              </div>
               <div className="space-y-1.5">
                 <label htmlFor="adm-transfer-owner" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                   Pemilik Baru
@@ -1214,14 +1396,19 @@ export default function AdminPanelTab({
               <div className="pt-2 flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800">
                 <button
                   type="button"
+                  disabled={transferring}
                   onClick={() => setTransferServer(null)}
-                  className="h-9 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs font-medium cursor-pointer"
+                  className="h-9 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs font-medium cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  disabled={transferring}
+                  disabled={
+                    transferring ||
+                    !transferOwnerId ||
+                    transferOwnerId === transferServer.ownerId
+                  }
                   className="h-9 px-4 rounded-md bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 text-xs font-medium disabled:opacity-50 cursor-pointer"
                 >
                   {transferring ? 'Memindahkan...' : 'Pindahkan'}

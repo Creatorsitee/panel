@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   createServerRecord,
+  getUserById,
   listAllServers,
   listServersForUser,
 } from '@/lib/db';
-import { writeInitialDotEnv } from '@/lib/file-manager';
 import { getHostVpsInfo, getServerMetrics } from '@/lib/process-manager';
 import { requireAuth } from '@/lib/route-guard';
 import {
@@ -16,6 +16,8 @@ import {
 import {
   getDefaultCpuPercent,
   getDefaultMemoryMb,
+  getEffectiveMinCpuPercent,
+  getEffectiveMinMemoryMb,
   getPerServerMaxCpuPercent,
   getPerServerMaxMemoryMb,
 } from '@/lib/vps-specs';
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json()) as {
+      ownerId?: string;
       name?: string;
       description?: string;
       runtime?: ServerRuntime;
@@ -49,6 +52,27 @@ export async function POST(req: NextRequest) {
       cpuLimitPercent?: number;
       autoRestart?: boolean;
     };
+
+    let targetOwnerId = auth.user.id;
+    if (body.ownerId !== undefined && body.ownerId.trim() !== '') {
+      const requestedOwnerId = body.ownerId.trim();
+      if (requestedOwnerId !== auth.user.id) {
+        if (auth.user.role !== 'admin') {
+          return NextResponse.json(
+            { error: 'Hanya administrator yang dapat membuat server untuk user lain.' },
+            { status: 403 }
+          );
+        }
+        const ownerRecord = getUserById(requestedOwnerId);
+        if (!ownerRecord) {
+          return NextResponse.json(
+            { error: 'User pemilik server tidak ditemukan.' },
+            { status: 400 }
+          );
+        }
+        targetOwnerId = ownerRecord.id;
+      }
+    }
 
     const name = validateServerName(body.name || '');
     const runtime: ServerRuntime = body.runtime === 'python' ? 'python' : 'nodejs';
@@ -105,13 +129,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const minMemForServer = getEffectiveMinMemoryMb(effectiveMaxMem);
+    const minCpuForServer = getEffectiveMinCpuPercent(effectiveMaxCpu);
+
     const memoryLimitMb = Math.min(
       effectiveMaxMem,
-      Math.max(512, Number.isFinite(requestedMem) && requestedMem > 0 ? requestedMem : defaultMemoryMb)
+      Math.max(minMemForServer, Number.isFinite(requestedMem) && requestedMem > 0 ? requestedMem : defaultMemoryMb)
     );
     const cpuLimitPercent = Math.min(
       effectiveMaxCpu,
-      Math.max(10, Number.isFinite(requestedCpu) && requestedCpu > 0 ? requestedCpu : defaultCpuPercent)
+      Math.max(minCpuForServer, Number.isFinite(requestedCpu) && requestedCpu > 0 ? requestedCpu : defaultCpuPercent)
     );
 
     const usedPorts = listAllServers().map((s) => s.port);
@@ -122,7 +149,7 @@ export async function POST(req: NextRequest) {
       : allocateNextPort(usedPorts);
 
     const server = await createServerRecord({
-      ownerId: auth.session.userId,
+      ownerId: targetOwnerId,
       name,
       description: (body.description || '').trim().slice(0, 160),
       runtime,
@@ -131,11 +158,6 @@ export async function POST(req: NextRequest) {
       memoryLimitMb,
       cpuLimitPercent,
       autoRestart: Boolean(body.autoRestart),
-    });
-
-    writeInitialDotEnv(server.id, {
-      PORT: String(server.port),
-      ...(runtime === 'nodejs' ? { NODE_ENV: 'production' } : { PYTHONUNBUFFERED: '1' }),
     });
 
     return NextResponse.json(

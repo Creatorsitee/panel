@@ -11,6 +11,8 @@ import {
 import {
   getAvailableCpuPercent,
   getAvailableMemoryMb,
+  getEffectiveMinCpuPercent,
+  getEffectiveMinMemoryMb,
   getPerServerMaxCpuPercent,
   getPerServerMaxMemoryMb,
 } from '@/lib/vps-specs';
@@ -56,6 +58,7 @@ export async function PATCH(
     const isServerActive =
       currentMetrics.status === 'running' ||
       currentMetrics.status === 'starting' ||
+      currentMetrics.status === 'stopping' ||
       currentMetrics.status === 'installing';
     const perServerMaxMem = getPerServerMaxMemoryMb(host);
     const perServerMaxCpu = getPerServerMaxCpuPercent(host);
@@ -75,10 +78,10 @@ export async function PATCH(
     );
 
     const patch: Parameters<typeof updateServerRecord>[1] = {};
-    const actor = getUserById(access.session.userId);
+    const actor = access.user;
 
     if (body.ownerId !== undefined) {
-      if (!actor || actor.role !== 'admin') {
+      if (actor.role !== 'admin') {
         return NextResponse.json(
           { error: 'Hanya administrator yang dapat memindahkan kepemilikan server.' },
           { status: 403 }
@@ -106,7 +109,7 @@ export async function PATCH(
         .map((s) => s.port);
       const nextPort = validateServerPort(body.port, usedPorts);
       if (nextPort !== access.server.port) {
-        if (!actor || actor.role !== 'admin') {
+        if (actor.role !== 'admin') {
           return NextResponse.json(
             { error: 'Anda tidak memiliki izin untuk mengubah port server.' },
             { status: 403 }
@@ -117,29 +120,35 @@ export async function PATCH(
     }
     if (body.memoryLimitMb !== undefined) {
       const requestedMem = Number(body.memoryLimitMb);
-      if (Number.isFinite(requestedMem) && requestedMem > maxMemoryForServer) {
-        return NextResponse.json(
-          { error: `Alokasi memori melebihi batas per server atau sisa kapasitas VPS (${maxMemoryForServer} MB).` },
-          { status: 400 }
+      if (Number.isFinite(requestedMem) && requestedMem !== access.server.memoryLimitMb) {
+        if (requestedMem > maxMemoryForServer) {
+          return NextResponse.json(
+            { error: `Alokasi memori melebihi batas per server atau sisa kapasitas VPS (${maxMemoryForServer} MB).` },
+            { status: 400 }
+          );
+        }
+        const minMemForServer = getEffectiveMinMemoryMb(maxMemoryForServer);
+        patch.memoryLimitMb = Math.min(
+          maxMemoryForServer,
+          Math.max(minMemForServer, requestedMem || access.server.memoryLimitMb)
         );
       }
-      patch.memoryLimitMb = Math.min(
-        maxMemoryForServer,
-        Math.max(512, requestedMem || access.server.memoryLimitMb)
-      );
     }
     if (body.cpuLimitPercent !== undefined) {
       const requestedCpu = Number(body.cpuLimitPercent);
-      if (Number.isFinite(requestedCpu) && requestedCpu > maxCpuForServer) {
-        return NextResponse.json(
-          { error: `Batas CPU melebihi batas per server atau sisa kapasitas VPS (${maxCpuForServer}%).` },
-          { status: 400 }
+      if (Number.isFinite(requestedCpu) && requestedCpu !== access.server.cpuLimitPercent) {
+        if (requestedCpu > maxCpuForServer) {
+          return NextResponse.json(
+            { error: `Batas CPU melebihi batas per server atau sisa kapasitas VPS (${maxCpuForServer}%).` },
+            { status: 400 }
+          );
+        }
+        const minCpuForServer = getEffectiveMinCpuPercent(maxCpuForServer);
+        patch.cpuLimitPercent = Math.min(
+          maxCpuForServer,
+          Math.max(minCpuForServer, requestedCpu || access.server.cpuLimitPercent)
         );
       }
-      patch.cpuLimitPercent = Math.min(
-        maxCpuForServer,
-        Math.max(10, requestedCpu || access.server.cpuLimitPercent)
-      );
     }
     if (body.autoRestart !== undefined) {
       patch.autoRestart = Boolean(body.autoRestart);

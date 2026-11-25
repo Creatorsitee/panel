@@ -9,21 +9,57 @@ export function ShimmerBlock({ className = '' }: { className?: string }) {
 export function HostStatsSkeleton() {
   return (
     <div
-      className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4"
+      className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 space-y-4"
       aria-hidden="true"
     >
-      <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
         <div className="flex items-center gap-2">
-          <ShimmerBlock className="w-4 h-4 rounded-sm" />
+          <ShimmerBlock className="w-4 h-4 rounded-sm shrink-0" />
           <ShimmerBlock className="h-3.5 w-36" />
         </div>
+        <ShimmerBlock className="h-3 w-48" />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+      {/* Row 1: 4 Hardware Utilization Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[0, 1, 2, 3].map((idx) => (
-          <div key={idx} className="space-y-2 min-w-0">
-            <ShimmerBlock className="h-3 w-20 max-w-full" />
-            <ShimmerBlock className="h-4 w-32 max-w-full" />
+          <div
+            key={idx}
+            className="bg-white dark:bg-zinc-950/70 border border-zinc-200/80 dark:border-zinc-800/80 rounded-md p-3 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <ShimmerBlock className="w-3.5 h-3.5 rounded-sm shrink-0" />
+                <ShimmerBlock className="h-3 w-24" />
+              </div>
+              <ShimmerBlock className="h-3 w-9" />
+            </div>
+            <ShimmerBlock className="h-1.5 w-full rounded-full" />
+            <div className="flex items-center justify-between gap-2">
+              <ShimmerBlock className="h-3 w-20" />
+              <ShimmerBlock className="h-3 w-20" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Row 2: 3 Technical Spec Cards (each has header + 3 key/value rows) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+        {[0, 1, 2].map((idx) => (
+          <div
+            key={idx}
+            className="bg-white/70 dark:bg-zinc-950/40 border border-zinc-200/70 dark:border-zinc-800/70 rounded-md p-3 space-y-2"
+          >
+            <div className="flex items-center gap-1.5">
+              <ShimmerBlock className="w-3.5 h-3.5 rounded-sm shrink-0" />
+              <ShimmerBlock className="h-3 w-28" />
+            </div>
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex items-center justify-between gap-2">
+                <ShimmerBlock className="h-2.5 w-20" />
+                <ShimmerBlock className="h-2.5 w-28" />
+              </div>
+            ))}
           </div>
         ))}
       </div>
@@ -31,7 +67,7 @@ export function HostStatsSkeleton() {
   );
 }
 
-export function ServerCardsSkeleton({ count = 6 }: { count?: number }) {
+export function ServerCardsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" aria-hidden="true">
       {Array.from({ length: count }).map((_, idx) => (
@@ -48,12 +84,12 @@ export function ServerCardsSkeleton({ count = 6 }: { count?: number }) {
               <ShimmerBlock className="h-5 w-16 rounded" />
             </div>
             <div className="p-2 rounded bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80">
-              <ShimmerBlock className="h-3.5 w-44" />
+              <ShimmerBlock className="h-3.5 w-44 max-w-full" />
             </div>
           </div>
 
           <div className="pt-4 mt-4 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-            <ShimmerBlock className="h-3 w-28" />
+            <ShimmerBlock className="h-3 w-32" />
             <ShimmerBlock className="h-3.5 w-14" />
           </div>
         </div>
@@ -69,79 +105,23 @@ export function DashboardContentSkeleton() {
       <HostStatsSkeleton />
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3" aria-hidden="true">
-        <ShimmerBlock className="h-9 w-full max-w-sm rounded" />
+        <ShimmerBlock className="h-9 w-full sm:max-w-sm rounded" />
         <ShimmerBlock className="h-9 w-full sm:w-64 rounded" />
       </div>
 
-      <ServerCardsSkeleton count={6} />
-    </div>
-  );
-}
-
-export function WorkspaceBootSkeleton() {
-  return (
-    <div
-      className="min-h-screen bg-white dark:bg-[#09090B] text-zinc-900 dark:text-zinc-100 flex"
-      role="status"
-      aria-label="Memuat panel cmnty"
-    >
-      <span className="sr-only">Memuat panel cmnty...</span>
-
-      {/* Sidebar Skeleton */}
-      <aside
-        className="hidden lg:flex w-60 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex-col shrink-0"
-        aria-hidden="true"
-      >
-        <div className="h-14 px-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center">
-          <ShimmerBlock className="h-4 w-16" />
-        </div>
-
-        <div className="flex-1 p-3 space-y-6">
-          <div className="space-y-2">
-            <ShimmerBlock className="h-3 w-24 mx-3" />
-            <ShimmerBlock className="h-9 w-full rounded" />
-            <ShimmerBlock className="h-9 w-full rounded" />
-          </div>
-        </div>
-
-        <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-3">
-          <ShimmerBlock className="h-9 w-full rounded" />
-          <div className="flex items-center justify-between gap-2 px-1">
-            <div className="space-y-1.5 flex-1">
-              <ShimmerBlock className="h-3.5 w-24" />
-              <ShimmerBlock className="h-3 w-32" />
-            </div>
-            <ShimmerBlock className="w-8 h-8 rounded" />
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content Skeleton */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <header
-          className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 flex items-center justify-between gap-3 sm:gap-4"
-          aria-hidden="true"
-        >
-          <ShimmerBlock className="h-4 w-32 sm:w-40" />
-          <ShimmerBlock className="h-8 w-24 sm:w-28 rounded" />
-        </header>
-
-        <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
-          <DashboardContentSkeleton />
-        </main>
-      </div>
+      <ServerCardsSkeleton count={3} />
     </div>
   );
 }
 
 export function ConsoleLinesSkeleton() {
-  const widths = ['w-72', 'w-96', 'w-64', 'w-80', 'w-56', 'w-88'];
+  const widths = ['w-64', 'w-80', 'w-56', 'w-72', 'w-48', 'w-60'];
   return (
-    <div className="space-y-2.5 py-1" role="status" aria-label="Menghubungkan stream console">
+    <div className="space-y-1.5 py-0.5" role="status" aria-label="Menghubungkan stream console">
       <span className="sr-only">Menghubungkan stream console...</span>
       {widths.map((w, idx) => (
-        <div key={idx} className="flex items-center gap-2" aria-hidden="true">
-          <ShimmerBlock className="h-3 w-24 shrink-0" />
+        <div key={idx} className="flex items-center gap-2 h-5" aria-hidden="true">
+          <ShimmerBlock className="h-3 w-28 shrink-0" />
           <ShimmerBlock className={`h-3 ${w} max-w-full`} />
         </div>
       ))}
@@ -161,10 +141,10 @@ export function FileManagerSkeleton() {
       {nameWidths.map((w, idx) => (
         <div
           key={idx}
-          className="px-3 sm:px-4 py-3 flex items-center justify-between gap-3"
+          className="px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2 sm:gap-3"
           aria-hidden="true"
         >
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+          <div className="flex items-center gap-2.5 flex-1 min-w-0 py-0.5">
             <ShimmerBlock className="w-4 h-4 rounded-sm shrink-0" />
             <ShimmerBlock className={`h-3.5 ${w} max-w-full`} />
           </div>
@@ -203,6 +183,327 @@ export function FileEditorSkeleton() {
       {lineWidths.map((w, idx) => (
         <ShimmerBlock key={idx} className={`h-3.5 ${w} max-w-full`} />
       ))}
+    </div>
+  );
+}
+
+export function ServerWorkspaceSkeleton({
+  tab = 'console',
+}: {
+  tab?: 'console' | 'files' | 'settings';
+}) {
+  return (
+    <div className="space-y-5 sm:space-y-6" role="status" aria-label="Memuat workspace server">
+      <span className="sr-only">Memuat workspace server...</span>
+
+      {/* Server Page Header */}
+      <div
+        className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800"
+        aria-hidden="true"
+      >
+        <div className="space-y-1.5">
+          <ShimmerBlock className="h-3 w-32" />
+          <ShimmerBlock className="h-6 w-48" />
+        </div>
+        <div className="flex lg:hidden items-center gap-1.5">
+          <ShimmerBlock className="h-7 w-16 rounded" />
+          <ShimmerBlock className="h-7 w-24 rounded" />
+          <ShimmerBlock className="h-7 w-20 rounded" />
+        </div>
+      </div>
+
+      {tab === 'console' && (
+        <div className="space-y-4 max-w-5xl mx-auto pb-10" aria-hidden="true">
+          {/* Power Bar: 4 equal action buttons */}
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[0, 1, 2, 3].map((i) => (
+              <ShimmerBlock key={i} className="h-8 w-full rounded" />
+            ))}
+          </div>
+
+          {/* Console Terminal Card */}
+          <div className="bg-[#09090B] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+            <div className="px-3 sm:px-4 py-2 bg-[#111114] border-b border-zinc-800 flex items-center justify-between">
+              <ShimmerBlock className="h-5 w-16 rounded" />
+              <ShimmerBlock className="h-4 w-12 rounded" />
+            </div>
+            <div className="h-[340px] sm:h-[420px] p-3 sm:p-4 bg-[#09090B]">
+              <ConsoleLinesSkeleton />
+            </div>
+            <div className="border-t border-zinc-800/90 bg-[#0C0C0E] px-3 sm:px-3.5 h-10 flex items-center gap-2">
+              <ShimmerBlock className="h-3.5 w-3.5 rounded-sm shrink-0" />
+              <ShimmerBlock className="h-3.5 w-44" />
+            </div>
+          </div>
+
+          {/* 4-Tile Metrics Row */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 space-y-1.5"
+                >
+                  <ShimmerBlock className="h-3 w-16" />
+                  <ShimmerBlock className="h-5 w-24" />
+                </div>
+              ))}
+            </div>
+
+            {/* 2 Area Charts Row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 space-y-3"
+                >
+                  <ShimmerBlock className="h-3.5 w-20" />
+                  <ShimmerBlock className="h-[176px] w-full rounded-md" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'files' && (
+        <div className="space-y-4 max-w-5xl mx-auto pb-10" aria-hidden="true">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+            <div className="flex items-center gap-2">
+              <ShimmerBlock className="h-7 w-16 rounded" />
+              <ShimmerBlock className="h-3.5 w-20" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <ShimmerBlock className="h-7 w-20 rounded" />
+              <ShimmerBlock className="h-7 w-24 rounded" />
+              <ShimmerBlock className="h-7 w-18 rounded" />
+            </div>
+          </div>
+          <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-[#0c0c0e]">
+            <FileManagerSkeleton />
+          </div>
+        </div>
+      )}
+
+      {tab === 'settings' && (
+        <div className="space-y-6 max-w-3xl pb-12" aria-hidden="true">
+          <ShimmerBlock className="h-4 w-36" />
+          <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 space-y-4">
+            <ShimmerBlock className="h-4 w-48" />
+            <ShimmerBlock className="h-9 w-full rounded" />
+            <ShimmerBlock className="h-4 w-56" />
+          </div>
+          <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 space-y-4">
+            <ShimmerBlock className="h-4 w-44" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ShimmerBlock className="h-9 w-full rounded" />
+              <ShimmerBlock className="h-9 w-full rounded" />
+              <ShimmerBlock className="h-9 w-full rounded" />
+              <ShimmerBlock className="h-9 w-full rounded" />
+            </div>
+            <ShimmerBlock className="h-9 w-full rounded" />
+          </div>
+          <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 sm:p-5 space-y-3">
+            <ShimmerBlock className="h-4 w-28" />
+            <ShimmerBlock className="h-3 w-3/4" />
+            <ShimmerBlock className="h-8 w-36 rounded" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AdminTableSkeleton({ section = 'users' }: { section?: 'users' | 'servers' }) {
+  return (
+    <div aria-hidden="true">
+      {/* Mobile Cards */}
+      <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800/70">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="p-3.5 space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="space-y-1.5 flex-1">
+                <ShimmerBlock className="h-3.5 w-32" />
+                <ShimmerBlock className="h-3 w-44" />
+              </div>
+              <ShimmerBlock className="h-5 w-14 rounded" />
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-zinc-800/70">
+              <ShimmerBlock className="h-3 w-28" />
+              <div className="flex items-center gap-1.5">
+                <ShimmerBlock className="h-7 w-14 rounded" />
+                <ShimmerBlock className="h-7 w-14 rounded" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop Table */}
+      <div className="hidden md:block">
+        <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 px-4 py-2.5 grid grid-cols-5 gap-4">
+          <ShimmerBlock className="h-3 w-16" />
+          <ShimmerBlock className="h-3 w-14" />
+          <ShimmerBlock className="h-3 w-16" />
+          <ShimmerBlock className="h-3 w-20" />
+          <ShimmerBlock className="h-3 w-12 ml-auto" />
+        </div>
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="px-4 py-3.5 grid grid-cols-5 items-center gap-4">
+              <div className="space-y-1.5">
+                <ShimmerBlock className="h-3.5 w-28" />
+                <ShimmerBlock className="h-3 w-36" />
+              </div>
+              <div className="space-y-1.5">
+                <ShimmerBlock className="h-3.5 w-20" />
+                {section === 'servers' && <ShimmerBlock className="h-3 w-32" />}
+              </div>
+              <ShimmerBlock className="h-3.5 w-16" />
+              <ShimmerBlock className="h-5 w-16 rounded" />
+              <div className="flex items-center justify-end gap-1.5">
+                <ShimmerBlock className="h-7 w-14 rounded" />
+                <ShimmerBlock className="h-7 w-14 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AdminRouteSkeleton({ section = 'users' }: { section?: 'users' | 'servers' }) {
+  return (
+    <div className="space-y-6 pb-12" role="status" aria-label="Memuat panel admin">
+      <span className="sr-only">Memuat panel admin...</span>
+
+      <div
+        className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800"
+        aria-hidden="true"
+      >
+        <div className="space-y-1.5">
+          <ShimmerBlock className="h-3 w-28" />
+          <ShimmerBlock className="h-6 w-36" />
+        </div>
+        <ShimmerBlock className="h-10 w-full sm:w-52 rounded" />
+      </div>
+
+      {/* 4 Overview Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3" aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-3.5 space-y-2"
+          >
+            <ShimmerBlock className="h-3 w-24" />
+            <ShimmerBlock className="h-6 w-16" />
+            <ShimmerBlock className="h-3 w-28" />
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3" aria-hidden="true">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
+          <ShimmerBlock className="h-9 w-full sm:max-w-sm rounded" />
+          <ShimmerBlock className="h-9 w-full sm:w-52 rounded" />
+        </div>
+        <ShimmerBlock className="h-9 w-full sm:w-32 rounded" />
+      </div>
+
+      {/* Table */}
+      <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-[#0C0C0E]">
+        <AdminTableSkeleton section={section} />
+      </div>
+    </div>
+  );
+}
+
+export function WorkspaceBootSkeleton({
+  routeKind = 'dashboard',
+  serverTab = 'console',
+  adminSection = 'users',
+}: {
+  routeKind?: 'dashboard' | 'server' | 'admin';
+  serverTab?: 'console' | 'files' | 'settings';
+  adminSection?: 'users' | 'servers';
+}) {
+  return (
+    <div
+      className="min-h-screen bg-white dark:bg-[#09090B] text-zinc-900 dark:text-zinc-100 flex"
+      role="status"
+      aria-label="Memuat panel cmnty"
+    >
+      <span className="sr-only">Memuat panel cmnty...</span>
+
+      {/* Sidebar Skeleton matching PanelContext */}
+      <aside
+        className="hidden lg:flex w-60 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex-col shrink-0"
+        aria-hidden="true"
+      >
+        <div className="h-14 px-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center">
+          <ShimmerBlock className="h-4 w-16" />
+        </div>
+
+        <div className="flex-1 p-3 space-y-6">
+          <div className="space-y-1.5">
+            <ShimmerBlock className="h-3 w-24 mx-3 mb-2" />
+            <ShimmerBlock className="h-9 w-full rounded" />
+            {routeKind === 'admin' && (
+              <div className="pt-4 space-y-1.5">
+                <ShimmerBlock className="h-3 w-24 mx-3 mb-2" />
+                <ShimmerBlock className="h-9 w-full rounded" />
+                <ShimmerBlock className="h-9 w-full rounded" />
+              </div>
+            )}
+          </div>
+
+          {routeKind === 'server' && (
+            <div className="space-y-1.5 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+              <ShimmerBlock className="h-3 w-28 mx-3 mb-2" />
+              <ShimmerBlock className="h-9 w-full rounded" />
+              <ShimmerBlock className="h-9 w-full rounded" />
+              <ShimmerBlock className="h-9 w-full rounded" />
+            </div>
+          )}
+        </div>
+
+        <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-3">
+          <ShimmerBlock className="h-9 w-full rounded" />
+          <div className="flex items-center justify-between gap-2 px-1">
+            <div className="space-y-1.5 flex-1">
+              <ShimmerBlock className="h-3.5 w-24" />
+              <ShimmerBlock className="h-3 w-32" />
+            </div>
+            <ShimmerBlock className="w-8 h-8 rounded" />
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Skeleton */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <header
+          className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 flex items-center justify-between gap-3 sm:gap-4"
+          aria-hidden="true"
+        >
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <ShimmerBlock className="lg:hidden w-8 h-8 rounded shrink-0" />
+            <ShimmerBlock className="h-4 w-36 sm:w-48" />
+          </div>
+          <ShimmerBlock className="h-8 w-24 sm:w-28 rounded" />
+        </header>
+
+        <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
+          {routeKind === 'server' ? (
+            <ServerWorkspaceSkeleton tab={serverTab} />
+          ) : routeKind === 'admin' ? (
+            <AdminRouteSkeleton section={adminSection} />
+          ) : (
+            <DashboardContentSkeleton />
+          )}
+        </main>
+      </div>
     </div>
   );
 }

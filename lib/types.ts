@@ -1,6 +1,12 @@
 export type ServerRuntime = 'nodejs' | 'python';
 
-export type ServerStatus = 'stopped' | 'starting' | 'running' | 'installing' | 'error';
+export type ServerStatus =
+  | 'stopped'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'installing'
+  | 'error';
 
 export type UserRole = 'admin' | 'user';
 
@@ -68,21 +74,34 @@ export interface FileEntry {
 export interface HostVpsInfo {
   hostname: string;
   platform: string;
+  osDistro: string;
+  kernel: string;
   arch: string;
+  primaryIp: string | null;
   cpuModel: string;
   cpuCores: number;
+  hostCpuPercent: number;
   loadAvg: [number, number, number];
   totalMemoryMb: number;
   freeMemoryMb: number;
   usedMemoryMb: number;
+  swapTotalMb: number;
+  swapUsedMb: number;
+  swapFreeMb: number;
+  diskTotalGb: number;
+  diskUsedGb: number;
+  diskFreeGb: number;
   allocatedMemoryMb: number;
   allocatedCpuPercent: number;
   availableMemoryMb: number;
   availableCpuPercent: number;
   uptimeSeconds: number;
   nodeVersion: string;
+  npmVersion: string | null;
   pythonVersion: string | null;
+  pipVersion: string | null;
   activeServersCount: number;
+  totalServersCount: number;
 }
 
 export interface AdminUserSummary extends PublicUser {

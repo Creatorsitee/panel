@@ -123,33 +123,13 @@ const SEMANTIC_TOKEN_RE = new RegExp(
     // 4: Warning keywords
     /(\[?(?:WARN|WARNING)\]?|\bnpm warn\b)/.source,
     // 5: Success / Ready keywords
-    /(\[?(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED|DONE|OK)\]?)/.source,
-    // 6: Info / Notice keywords
-    /(\[?(?:INFO|NOTICE)\]?|\bnpm notice\b)/.source,
-    // 7: Debug / Trace keywords
-    /(\[?(?:DEBUG|TRACE)\]?)/.source,
-    // 8: File path with line(:col)
+    /(\[(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED)\]|(?<=^|\s)(?:READY|LISTENING|CONNECTED)(?=\s|:|$))/.source,
+    // 6: Info / Notice tags
+    /(\[(?:INFO|NOTICE|DEBUG)\]|\b(?:INFO|NOTICE|DEBUG):|\bnpm notice\b)/.source,
+    // 7: File path with line(:col)
     /([a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|py|json|ya?ml|env|sh|sql):\d+(?::\d+)?)/.source,
-    // 9: Host:Port or :Port
-    /(\b(?:localhost|\d{1,3}(?:\.\d{1,3}){3}):\d{2,5}\b|:\d{4,5}\b)/.source,
-    // 10: HTTP Methods (Read)
-    /(\b(?:GET|HEAD|OPTIONS)\b)/.source,
-    // 11: HTTP Methods (Write)
-    /(\b(?:POST|PUT|PATCH)\b)/.source,
-    // 12: HTTP Methods (Delete)
-    /(\bDELETE\b)/.source,
-    // 13: Quoted strings
-    /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')/.source,
-    // 14: Env key=value
-    /(\b[A-Z_][A-Z0-9_]{1,}=[^\s]+)/.source,
-    // 15: CLI flags (--flag or -f)
-    /(?:(?<=^|\s)(--?[a-zA-Z0-9][a-zA-Z0-9-]*))/.source,
-    // 16: Durations, sizes, percentages
-    /(\b\d+(?:\.\d+)?(?:ms|us|ns|s|KiB|MiB|GiB|KB|MB|GB|%)\b)/.source,
-    // 17: HTTP status codes (contextual)
-    /(?:(?<=^|[\s/(\[])([1-5]\d{2})(?=$|[\s,)\]]))/.source,
-    // 18: Literals
-    /(\b(?:true|false|null|undefined|None|True|False)\b)/.source,
+    // 8: Structured HTTP request + status (e.g. "GET /api/health 200")
+    /(\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/[^\s]*\s+[1-5]\d{2}\b)/.source,
   ].join('|'),
   'g'
 );
@@ -157,40 +137,34 @@ const SEMANTIC_TOKEN_RE = new RegExp(
 function classifySemanticToken(match: RegExpExecArray, defaultClass: string): HighlightToken[] {
   const full = match[0];
 
-  if (match[1]) return [{ text: full, className: 'text-cyan-400' }];
+  if (match[1]) {
+    return [{ text: full, className: 'text-cyan-400 underline decoration-cyan-400/30 underline-offset-2' }];
+  }
   if (match[2]) return [{ text: full, className: 'text-zinc-500' }];
   if (match[3]) return [{ text: full, className: 'text-red-400 font-medium' }];
   if (match[4]) return [{ text: full, className: 'text-amber-400 font-medium' }];
   if (match[5]) return [{ text: full, className: 'text-emerald-400 font-medium' }];
-  if (match[6]) return [{ text: full, className: 'text-sky-400' }];
-  if (match[7]) return [{ text: full, className: 'text-violet-400' }];
-  if (match[8]) return [{ text: full, className: 'text-amber-300' }];
-  if (match[9]) return [{ text: full, className: 'text-cyan-300' }];
-  if (match[10]) return [{ text: full, className: 'text-sky-400 font-medium' }];
-  if (match[11]) return [{ text: full, className: 'text-emerald-400 font-medium' }];
-  if (match[12]) return [{ text: full, className: 'text-red-400 font-medium' }];
-  if (match[13]) return [{ text: full, className: 'text-teal-300/90' }];
-  if (match[14]) {
-    const eqIdx = full.indexOf('=');
-    return [
-      { text: full.slice(0, eqIdx), className: 'text-sky-300' },
-      { text: '=', className: 'text-zinc-500' },
-      { text: full.slice(eqIdx + 1), className: 'text-teal-300' },
-    ];
+  if (match[6]) return [{ text: full, className: 'text-zinc-400 font-medium' }];
+  if (match[7]) {
+    return [{ text: full, className: 'text-zinc-400 underline decoration-zinc-600/70 underline-offset-2' }];
   }
-  if (match[15]) return [{ text: full, className: 'text-violet-300' }];
-  if (match[16]) return [{ text: full, className: 'text-amber-300/90' }];
-  if (match[17]) {
-    const code = Number(full);
-    const cls =
-      code < 300
-        ? 'text-emerald-400'
-        : code < 400
-        ? 'text-amber-400'
-        : 'text-red-400';
-    return [{ text: full, className: cls }];
+  if (match[8]) {
+    const parts = /^(\S+)(\s+\/[^\s]*\s+)([1-5]\d{2})$/.exec(full);
+    if (parts) {
+      const code = Number(parts[3]);
+      const statusCls =
+        code < 300
+          ? 'text-emerald-400 font-medium'
+          : code < 400
+          ? 'text-amber-400 font-medium'
+          : 'text-red-400 font-medium';
+      return [
+        { text: parts[1], className: 'text-zinc-100 font-medium' },
+        { text: parts[2], className: defaultClass },
+        { text: parts[3], className: statusCls },
+      ];
+    }
   }
-  if (match[18]) return [{ text: full, className: 'text-violet-300' }];
 
   return [{ text: full, className: defaultClass }];
 }

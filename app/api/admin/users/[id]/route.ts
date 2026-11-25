@@ -62,9 +62,9 @@ export async function PATCH(
     }
 
     if (body.password !== undefined && body.password !== '') {
-      if (body.password.length < 6 || body.password.length > 128) {
+      if (!body.password.trim() || body.password.length < 6 || body.password.length > 128) {
         return NextResponse.json(
-          { error: 'Password baru minimal 6 karakter.' },
+          { error: 'Password baru minimal 6 karakter dan tidak boleh hanya spasi.' },
           { status: 400 }
         );
       }

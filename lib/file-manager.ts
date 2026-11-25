@@ -29,11 +29,11 @@ export function verifyServerScriptFile(serverId: string, relPath: string): strin
   assertRealContainment(baseDir, target);
 
   if (!fs.existsSync(target)) {
-    throw new Error(`File script "${relPath}" tidak ditemukan di direktori server ini.`);
+    throw new Error(`Entrypoint file "${relPath}" was not found in this server directory.`);
   }
   const stat = fs.statSync(target);
   if (!stat.isFile()) {
-    throw new Error(`Target "${relPath}" bukan file yang dapat dijalankan.`);
+    throw new Error(`Target "${relPath}" is not an executable file.`);
   }
   return target;
 }
@@ -81,7 +81,7 @@ export function verifyServerPythonModule(
   if (!KNOWN_PYTHON_RUNNERS.has(moduleName)) {
     if (!resolvePythonModuleOrTarget(baseDir, moduleName)) {
       throw new Error(
-        `Modul Python "${moduleName}" tidak ditemukan di direktori server ini.`
+        `Python module "${moduleName}" was not found in this server directory.`
       );
     }
     return;
@@ -120,21 +120,10 @@ export function verifyServerPythonModule(
   for (const target of candidateTargets) {
     if (!resolvePythonModuleOrTarget(baseDir, target)) {
       throw new Error(
-        `Target aplikasi Python "${target}" tidak ditemukan di direktori server ini.`
+        `Python application target "${target}" was not found in this server directory.`
       );
     }
   }
-}
-
-export function writeInitialDotEnv(serverId: string, env: Record<string, string>): void {
-  const baseDir = ensureServerDir(serverId);
-  const envPath = resolveSafePath(baseDir, '.env');
-  if (fs.existsSync(envPath)) return;
-  const lines = Object.entries(env).map(([k, v]) => {
-    const escaped = String(v).replace(/\r?\n/g, '\\n');
-    return `${k}=${escaped}`;
-  });
-  fs.writeFileSync(envPath, lines.join('\n') + (lines.length ? '\n' : ''), 'utf8');
 }
 
 export function readServerDotEnv(serverId: string): Record<string, string> {
@@ -152,7 +141,6 @@ export function updateServerDotEnvPort(serverId: string, port: number): void {
   const baseDir = ensureServerDir(serverId);
   const envPath = resolveSafePath(baseDir, '.env');
   if (!fs.existsSync(envPath)) {
-    writeInitialDotEnv(serverId, { PORT: String(port) });
     return;
   }
   assertRealContainment(baseDir, envPath);

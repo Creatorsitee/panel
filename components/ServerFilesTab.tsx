@@ -133,10 +133,14 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
   }, [serverId]);
 
   useEffect(() => {
-    if (!activeMenuPath) return;
+    if (!activeMenuPath && !newEntryType && !moveModalPath) return;
     const handleOutside = () => setActiveMenuPath(null);
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setActiveMenuPath(null);
+      if (e.key === 'Escape') {
+        setActiveMenuPath(null);
+        setNewEntryType(null);
+        setMoveModalPath(null);
+      }
     };
     window.addEventListener('click', handleOutside);
     window.addEventListener('keydown', handleKey);
@@ -144,7 +148,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       window.removeEventListener('click', handleOutside);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [activeMenuPath]);
+  }, [activeMenuPath, newEntryType, moveModalPath]);
 
   async function openFile(filePath: string) {
     if (!isEditableFile(filePath)) {
@@ -500,7 +504,19 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             <div className="flex items-center gap-2 sm:gap-3 text-xs font-mono text-zinc-300 min-w-0 flex-1">
               <button
                 type="button"
-                onClick={() => setSelectedFile(null)}
+                onClick={async () => {
+                  if (hasUnsavedChanges) {
+                    const discard = await showConfirmDialog({
+                      title: 'Perubahan belum disimpan',
+                      text: `Tutup "${selectedFile}" tanpa menyimpan perubahan?`,
+                      confirmText: 'Ya, Tutup',
+                      cancelText: 'Batal',
+                      destructive: true,
+                    });
+                    if (!discard) return;
+                  }
+                  setSelectedFile(null);
+                }}
                 className="text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1 cursor-pointer shrink-0"
                 title="Kembali ke Daftar File"
               >
@@ -609,7 +625,7 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                           }}
                           aria-label={`Pindahkan ${entry.name}`}
                           title="Pindahkan Folder"
-                          className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer"
+                          className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                         >
                           <Move className="w-3.5 h-3.5" />
                         </button>
@@ -625,25 +641,25 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                               setActiveMenuPath(activeMenuPath === entry.path ? null : entry.path);
                             }}
                             aria-label="Opsi ZIP"
-                            className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer"
+                            className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                           >
                             <MoreVertical className="w-4 h-4" />
                           </button>
 
                           {activeMenuPath === entry.path && (
-                            <div className="absolute right-0 mt-1 w-36 rounded shadow-xl bg-zinc-900 border border-zinc-700 py-1 z-50 text-xs">
+                            <div className="absolute right-0 mt-1 w-36 rounded shadow-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 py-1 z-50 text-xs">
                               <button
                                 type="button"
                                 onClick={() => handleExtractZip(entry.path)}
-                                className="w-full px-3 py-2 text-left text-zinc-200 hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                className="w-full px-3 py-2 text-left text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
                               >
-                                <FileArchive className="w-3.5 h-3.5 text-blue-400" />
+                                <FileArchive className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
                                 <span>Ekstrak ZIP</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteEntry(entry.path)}
-                                className="w-full px-3 py-2 text-left text-red-400 hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
+                                className="w-full px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 cursor-pointer"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                                 <span>Hapus</span>

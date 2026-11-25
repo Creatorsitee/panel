@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import AdminPanelTab from './AdminPanelTab';
 import { usePanel } from './PanelContext';
 
-export default function AdminRouteView() {
+interface AdminRouteViewProps {
+  section?: 'users' | 'servers';
+}
+
+export default function AdminRouteView({ section = 'users' }: AdminRouteViewProps) {
   const router = useRouter();
   const { user, loadWorkspaceData } = usePanel();
 
@@ -21,6 +25,7 @@ export default function AdminRouteView() {
 
   return (
     <AdminPanelTab
+      section={section}
       currentUser={user}
       onOpenServer={(serverId) => {
         void loadWorkspaceData();

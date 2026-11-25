@@ -1,5 +1,5 @@
-import AdminRouteView from '@/components/AdminRouteView';
+import { redirect } from 'next/navigation';
 
-export default function AdminPage() {
-  return <AdminRouteView />;
+export default function AdminIndexPage() {
+  redirect('/admin/user');
 }

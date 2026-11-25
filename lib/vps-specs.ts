@@ -5,8 +5,13 @@ export interface ResourceOption {
   label: string;
 }
 
+export const MIN_MEMORY_MB = 512;
+export const MIN_CPU_PERCENT = 10;
+export const MIN_PREFERRED_MEMORY_MB = 1024;
+export const MIN_PREFERRED_CPU_PERCENT = 50;
+
 export const MEMORY_PRESETS_MB = [
-  512, 768, 1024, 1536, 2048, 4096, 8192, 16384,
+  512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 16384,
 ];
 
 export const CPU_PRESETS_PERCENT = [
@@ -35,7 +40,7 @@ export function getVpsMaxMemoryMb(
   if (!host || !host.totalMemoryMb || host.totalMemoryMb <= 0) {
     return 1024;
   }
-  return Math.max(512, Math.round(host.totalMemoryMb));
+  return Math.max(MIN_MEMORY_MB, Math.round(host.totalMemoryMb));
 }
 
 export function getVpsMaxCpuPercent(
@@ -48,25 +53,36 @@ export function getVpsMaxCpuPercent(
 }
 
 /**
- * Fair-share per-server memory cap (minimum 512 MB) so one server cannot exhaust the entire VPS.
+ * Per-server memory cap: guarantees at least 1 GB (1024 MB) whenever the VPS has >= 1 GB total RAM.
  */
 export function getPerServerMaxMemoryMb(
   host?: Pick<HostVpsInfo, 'totalMemoryMb'> | null
 ): number {
   const totalMemoryMb = getVpsMaxMemoryMb(host);
-  const fairShare = Math.floor((totalMemoryMb * 0.4) / 128) * 128;
-  return Math.max(512, Math.min(4096, fairShare || 512));
+  if (totalMemoryMb < MIN_PREFERRED_MEMORY_MB) {
+    return Math.max(MIN_MEMORY_MB, Math.floor(totalMemoryMb / 128) * 128 || MIN_MEMORY_MB);
+  }
+  const fairShare = Math.floor((totalMemoryMb * 0.5) / 256) * 256;
+  return Math.max(MIN_PREFERRED_MEMORY_MB, Math.min(4096, fairShare));
 }
 
 /**
- * Fair-share per-server CPU cap so multiple users can run servers concurrently.
+ * Per-server CPU cap: guarantees at least 50% CPU whenever the VPS allows it.
  */
 export function getPerServerMaxCpuPercent(
   host?: Pick<HostVpsInfo, 'cpuCores'> | null
 ): number {
   const totalCpu = getVpsMaxCpuPercent(host);
-  const fairShare = Math.floor((totalCpu * 0.35) / 5) * 5;
-  return Math.max(15, Math.min(100, fairShare || 15));
+  const fairShare = Math.floor((totalCpu * 0.5) / 25) * 25;
+  return Math.max(MIN_PREFERRED_CPU_PERCENT, Math.min(100, fairShare));
+}
+
+export function getEffectiveMinMemoryMb(_effectiveMaxMem?: number): number {
+  return MIN_MEMORY_MB;
+}
+
+export function getEffectiveMinCpuPercent(_effectiveMaxCpu?: number): number {
+  return MIN_CPU_PERCENT;
 }
 
 export function getAvailableMemoryMb(
@@ -74,7 +90,7 @@ export function getAvailableMemoryMb(
   currentServerMemoryMb = 0
 ): number {
   if (!host) {
-    return Math.max(512, currentServerMemoryMb);
+    return Math.max(MIN_PREFERRED_MEMORY_MB, currentServerMemoryMb);
   }
   const maxTotal = getVpsMaxMemoryMb(host);
   const available = Math.max(0, Math.round(host.availableMemoryMb)) + currentServerMemoryMb;
@@ -107,7 +123,8 @@ export function getVpsMemoryOptions(
       values.add(preset);
     }
   }
-  if (currentServerMemoryMb >= 512) {
+
+  if (currentServerMemoryMb >= MIN_MEMORY_MB) {
     values.add(currentServerMemoryMb);
   }
 
@@ -133,7 +150,8 @@ export function getVpsCpuOptions(
       values.add(preset);
     }
   }
-  if (currentServerCpuPercent >= 10) {
+
+  if (currentServerCpuPercent >= MIN_CPU_PERCENT) {
     values.add(currentServerCpuPercent);
   }
 
@@ -149,12 +167,12 @@ export function getDefaultMemoryMb(
   host?: Pick<HostVpsInfo, 'totalMemoryMb' | 'availableMemoryMb'> | null
 ): number {
   const options = getVpsMemoryOptions(host, 0);
-  return options[0]?.value ?? 512;
+  return options[0]?.value ?? MIN_MEMORY_MB;
 }
 
 export function getDefaultCpuPercent(
   host?: Pick<HostVpsInfo, 'cpuCores' | 'availableCpuPercent'> | null
 ): number {
   const options = getVpsCpuOptions(host, 0);
-  return options[0]?.value ?? 10;
+  return options[0]?.value ?? MIN_CPU_PERCENT;
 }
