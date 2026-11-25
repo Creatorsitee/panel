@@ -424,11 +424,7 @@ export default function AdminPanelTab({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div>
-          <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-zinc-500">
-            <Shield className="w-3.5 h-3.5" />
-            <span>Manajemen Sistem</span>
-          </div>
-          <h1 className="text-xl font-bold tracking-tight mt-0.5 text-zinc-900 dark:text-zinc-100">
+          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
             {section === 'users' ? 'Kelola User' : 'Kelola Server'}
           </h1>
         </div>

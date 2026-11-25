@@ -435,10 +435,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
 
               {user.role === 'admin' && (
                 <>
-                  <div className="px-3 pt-4 pb-1 text-[10px] font-semibold tracking-wider text-zinc-400 uppercase flex items-center gap-1.5">
-                    <Shield className="w-3 h-3 shrink-0" />
-                    <span>Manajemen Sistem</span>
-                  </div>
+
                   <Link
                     href="/admin/user"
                     onClick={() => setMobileNavOpen(false)}
