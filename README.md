@@ -35,26 +35,41 @@
 
 ## Screenshots
 
-### Server Dashboard & Live Console
+### Server Dashboard, Deployment & Live Console
 
 | Servers Dashboard | Real-Time Console & Telemetry |
 | :---: | :---: |
 | <img src="docs/screenshots/dashboard.png" alt="Servers Dashboard" width="100%" /> | <img src="docs/screenshots/console.png" alt="Server Console" width="100%" /> |
-| Filter instances by runtime (`Semua Runtime` / `Node.js` / `Python`), search by name, description, or port, and track live status & CPU/RAM usage. | Power controls (`Start`, `Restart`, `Stop`, `Kill`), live jQuery-highlighted ANSI/semantic log streaming, interactive `stdin` bar, and CPU/Memory/Network charts. |
+| Filter instances by runtime (`Semua Runtime` / `Node.js` / `Python`), search by name or port, and monitor live CPU & RAM usage across all servers. | Power controls (`Start`, `Restart`, `Stop`, `Kill`), live jQuery-highlighted ANSI/semantic log streaming, interactive `stdin` bar, and live CPU/Memory/Network charts. |
 
-### File Manager & Host Resources
-
-| Integrated File Manager & Code Editor | Host System & Runtime Overview |
+| Create Server Modal | Server Settings & Resource Limits |
 | :---: | :---: |
-| <img src="docs/screenshots/files.png" alt="File Manager" width="100%" /> | <img src="docs/screenshots/host-resources.png" alt="Host Resources" width="100%" /> |
-| Navigate folders via breadcrumbs, multi-select to Move/Archive/Delete, upload files, extract ZIPs, and edit code with multi-language syntax highlighting. | Inspect host OS, kernel, CPU load, cgroup/system memory, swap, disk usage, allocated panel quotas, and installed Node.js/Python/npm/pip versions. |
+| <img src="docs/screenshots/create-server.png" alt="Create Server Modal" width="100%" /> | <img src="docs/screenshots/settings.png" alt="Server Settings" width="100%" /> |
+| Deploy new Node.js or Python instances with runtime presets, owner assignment, startup command, and host-bounded memory/CPU limits. | Auto-saving startup command, auto-restart toggle, side-by-side server metadata, memory/CPU quotas, internal port, and safe server deletion. |
 
-### Administration & Authentication
+### File Manager, Code Editor & Host Resources
 
-| Admin Server & User Management | Authentication Screen |
+| Integrated File Manager | Multi-Language CodeMirror Editor |
 | :---: | :---: |
-| <img src="docs/screenshots/admin.png" alt="Admin Panel" width="100%" /> | <img src="docs/screenshots/login.png" alt="Login Screen" width="100%" /> |
-| Manage user accounts (`/admin/user`) and all servers (`/admin/server`), perform remote power actions, transfer ownership, and audit active quotas. | Clean dark/light themed sign-in and registration screen with automatic first-admin onboarding and cookie + bearer session support. |
+| <img src="docs/screenshots/files.png" alt="File Manager" width="100%" /> | <img src="docs/screenshots/code-editor.png" alt="CodeMirror Code Editor" width="100%" /> |
+| Browse directories via breadcrumbs, create files/folders, multi-upload, rename, move, archive/extract `.zip`, and bulk-delete files safely. | Inline CodeMirror 6 editor with syntax highlighting for 100+ languages, line numbers, code folding, search (`Ctrl+F`), and `Ctrl+S` save. |
+
+| Host System & Runtime Overview | Authentication Screen |
+| :---: | :---: |
+| <img src="docs/screenshots/host-resources.png" alt="Host Resources" width="100%" /> | <img src="docs/screenshots/login.png" alt="Login Screen" width="100%" /> |
+| Inspect host OS, kernel, CPU load, system/cgroup memory, swap, disk usage, allocated panel quotas, and installed Node.js/Python/npm/pip versions. | Clean sign-in and registration screen with automatic first-admin onboarding and cookie + bearer session support. |
+
+### Administration & Mobile Responsive UI
+
+| Admin Server Management (`/admin/server`) | Admin User Management (`/admin/user`) |
+| :---: | :---: |
+| <img src="docs/screenshots/admin.png" alt="Admin Server Management" width="100%" /> | <img src="docs/screenshots/admin-users.png" alt="Admin User Management" width="100%" /> |
+| Audit all servers, filter by status, monitor live RAM/CPU consumption, trigger remote power actions, or transfer ownership. | Manage user accounts, assign `ADMIN` or `USER` roles, inspect per-user server counts, and audit active panel quotas. |
+
+| Mobile Responsive Dashboard | Mobile Responsive Console |
+| :---: | :---: |
+| <img src="docs/screenshots/mobile-dashboard.png" alt="Mobile Dashboard" width="320" /> | <img src="docs/screenshots/mobile-console.png" alt="Mobile Console" width="320" /> |
+| Clean single-column server cards, runtime filters, and slide-out drawer navigation tuned for mobile screens. | Side-by-side 4-button power bar, responsive terminal logs, and 2-column telemetry cards without horizontal overflow. |
 
 ---
 
