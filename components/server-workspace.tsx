@@ -23,7 +23,6 @@ export default function ServerWorkspaceView({
   const {
     user,
     servers,
-    hostInfo,
     loadingData,
     deletedServerIds,
     handleMetricsUpdate,
@@ -144,7 +143,6 @@ export default function ServerWorkspaceView({
         <ServerSettingsTab
           key={server.id}
           server={server}
-          hostInfo={hostInfo}
           isAdmin={user.role === 'admin'}
           onUpdated={handleServerUpdated}
           onDeleted={handleServerDeleted}

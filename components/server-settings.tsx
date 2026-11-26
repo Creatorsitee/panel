@@ -1,18 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Trash2, Terminal, ShieldAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { showConfirmDialog, showErrorAlert } from '@/lib/alerts';
-import {
-  getHostCpuOptions,
-  getHostMemoryOptions,
-} from '@/lib/resource-limits';
-import type { HostInfo, ServerWithMetrics } from '@/lib/types';
+import type { ServerWithMetrics } from '@/lib/types';
 
 interface ServerSettingsTabProps {
   server: ServerWithMetrics;
-  hostInfo: HostInfo | null;
   isAdmin: boolean;
   onUpdated: (server: ServerWithMetrics) => void;
   onDeleted: (serverId: string) => void;
@@ -20,7 +15,6 @@ interface ServerSettingsTabProps {
 
 export default function ServerSettingsTab({
   server,
-  hostInfo,
   isAdmin,
   onUpdated,
   onDeleted,
@@ -30,8 +24,6 @@ export default function ServerSettingsTab({
   const [startupCommand, setStartupCommand] = useState(server.startupCommand);
   const [autoRestart, setAutoRestart] = useState(server.autoRestart);
   const [portInput, setPortInput] = useState(String(server.port));
-  const [memoryLimitMb, setMemoryLimitMb] = useState(server.memoryLimitMb);
-  const [cpuLimitPercent, setCpuLimitPercent] = useState(server.cpuLimitPercent);
 
   const [deleting, setDeleting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -43,8 +35,6 @@ export default function ServerSettingsTab({
     startupCommand: server.startupCommand,
     autoRestart: server.autoRestart,
     port: server.port,
-    memoryLimitMb: server.memoryLimitMb,
-    cpuLimitPercent: server.cpuLimitPercent,
   });
 
   const localInputsRef = useRef({
@@ -53,8 +43,6 @@ export default function ServerSettingsTab({
     startupCommand,
     autoRestart,
     portInput,
-    memoryLimitMb,
-    cpuLimitPercent,
   });
   useEffect(() => {
     localInputsRef.current = {
@@ -63,10 +51,8 @@ export default function ServerSettingsTab({
       startupCommand,
       autoRestart,
       portInput,
-      memoryLimitMb,
-      cpuLimitPercent,
     };
-  }, [name, description, startupCommand, autoRestart, portInput, memoryLimitMb, cpuLimitPercent]);
+  }, [name, description, startupCommand, autoRestart, portInput]);
 
   useEffect(() => {
     const saved = lastSavedRef.current;
@@ -87,12 +73,6 @@ export default function ServerSettingsTab({
     if (local.portInput === String(saved.port) && server.port !== saved.port) {
       setPortInput(String(server.port));
     }
-    if (local.memoryLimitMb === saved.memoryLimitMb && server.memoryLimitMb !== saved.memoryLimitMb) {
-      setMemoryLimitMb(server.memoryLimitMb);
-    }
-    if (local.cpuLimitPercent === saved.cpuLimitPercent && server.cpuLimitPercent !== saved.cpuLimitPercent) {
-      setCpuLimitPercent(server.cpuLimitPercent);
-    }
 
     lastSavedRef.current = {
       name: server.name,
@@ -100,8 +80,6 @@ export default function ServerSettingsTab({
       startupCommand: server.startupCommand,
       autoRestart: server.autoRestart,
       port: server.port,
-      memoryLimitMb: server.memoryLimitMb,
-      cpuLimitPercent: server.cpuLimitPercent,
     };
   }, [
     server.name,
@@ -109,46 +87,7 @@ export default function ServerSettingsTab({
     server.startupCommand,
     server.autoRestart,
     server.port,
-    server.memoryLimitMb,
-    server.cpuLimitPercent,
   ]);
-
-  const isServerActive =
-    server.metrics.status === 'running' ||
-    server.metrics.status === 'starting' ||
-    server.metrics.status === 'installing';
-
-  const memoryOptions = useMemo(() => {
-    const opts = getHostMemoryOptions(hostInfo, isServerActive ? server.memoryLimitMb : 0);
-    if (!opts.some((o) => o.value === server.memoryLimitMb)) {
-      return [
-        ...opts,
-        {
-          value: server.memoryLimitMb,
-          label:
-            server.memoryLimitMb >= 1024
-              ? `${server.memoryLimitMb} MB (${Number((server.memoryLimitMb / 1024).toFixed(1))} GB)`
-              : `${server.memoryLimitMb} MB`,
-        },
-      ].sort((a, b) => a.value - b.value);
-    }
-    return opts;
-  }, [hostInfo, isServerActive, server.memoryLimitMb]);
-
-  const cpuOptions = useMemo(() => {
-    const opts = getHostCpuOptions(hostInfo, isServerActive ? server.cpuLimitPercent : 0);
-    if (!opts.some((o) => o.value === server.cpuLimitPercent)) {
-      const cores = Number((server.cpuLimitPercent / 100).toFixed(2));
-      return [
-        ...opts,
-        {
-          value: server.cpuLimitPercent,
-          label: `${server.cpuLimitPercent}% (${cores} ${cores === 1 ? 'Core' : 'Cores'})`,
-        },
-      ].sort((a, b) => a.value - b.value);
-    }
-    return opts;
-  }, [hostInfo, isServerActive, server.cpuLimitPercent]);
 
   const onUpdatedRef = useRef(onUpdated);
   useEffect(() => {
@@ -179,9 +118,7 @@ export default function ServerSettingsTab({
       description !== saved.description ||
       trimmedCmd !== saved.startupCommand ||
       autoRestart !== saved.autoRestart ||
-      portChanged ||
-      memoryLimitMb !== saved.memoryLimitMb ||
-      cpuLimitPercent !== saved.cpuLimitPercent;
+      portChanged;
 
     if (!isDirty) return;
 
@@ -198,8 +135,6 @@ export default function ServerSettingsTab({
               startupCommand: trimmedCmd,
               autoRestart,
               ...(portChanged ? { port: parsedPort } : {}),
-              memoryLimitMb,
-              cpuLimitPercent,
             }),
           }
         );
@@ -209,8 +144,6 @@ export default function ServerSettingsTab({
           startupCommand: res.server.startupCommand,
           autoRestart: res.server.autoRestart,
           port: res.server.port,
-          memoryLimitMb: res.server.memoryLimitMb,
-          cpuLimitPercent: res.server.cpuLimitPercent,
         };
         setSaveError(null);
         setSaveStatus('saved');
@@ -222,7 +155,7 @@ export default function ServerSettingsTab({
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [name, description, startupCommand, autoRestart, isAdmin, trimmedPort, parsedPort, portError, memoryLimitMb, cpuLimitPercent, server.id]);
+  }, [name, description, startupCommand, autoRestart, isAdmin, trimmedPort, parsedPort, portError, server.id]);
 
   async function handleDelete() {
     const confirmed = await showConfirmDialog({
@@ -308,7 +241,7 @@ export default function ServerSettingsTab({
         <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
-              Detail &amp; Alokasi Resource
+              Detail Server
             </h3>
           </div>
 
@@ -345,44 +278,6 @@ export default function ServerSettingsTab({
                 placeholder="Deskripsi singkat"
                 className="w-full h-9 px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
               />
-            </div>
-
-            <div className="col-span-2 grid grid-cols-2 gap-3 sm:gap-4">
-              <div className="space-y-1.5 min-w-0">
-                <label htmlFor="srv-mem" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
-                  Alokasi Memori
-                </label>
-                <select
-                  id="srv-mem"
-                  value={memoryLimitMb}
-                  onChange={(e) => setMemoryLimitMb(Number(e.target.value))}
-                  className="w-full h-9 px-2.5 sm:px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
-                >
-                  {memoryOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5 min-w-0">
-                <label htmlFor="srv-cpu" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
-                  Batas CPU
-                </label>
-                <select
-                  id="srv-cpu"
-                  value={cpuLimitPercent}
-                  onChange={(e) => setCpuLimitPercent(Number(e.target.value))}
-                  className="w-full h-9 px-2.5 sm:px-3 rounded bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500"
-                >
-                  {cpuOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
 
             <div className="space-y-1.5 col-span-2">

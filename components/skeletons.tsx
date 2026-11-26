@@ -329,7 +329,7 @@ export function ServerWorkspaceSkeleton({
 
           <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 sm:p-5 space-y-4">
             <div className="pb-3 border-b border-zinc-200 dark:border-zinc-800">
-              <ShimmerBlock className="h-3.5 w-44" />
+              <ShimmerBlock className="h-3.5 w-28" />
             </div>
             <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5">
@@ -339,16 +339,6 @@ export function ServerWorkspaceSkeleton({
               <div className="space-y-1.5">
                 <ShimmerBlock className="h-3 w-20" />
                 <ShimmerBlock className="h-9 w-full rounded" />
-              </div>
-              <div className="col-span-2 grid grid-cols-2 gap-3 sm:gap-4">
-                <div className="space-y-1.5">
-                  <ShimmerBlock className="h-3 w-28" />
-                  <ShimmerBlock className="h-9 w-full rounded" />
-                </div>
-                <div className="space-y-1.5">
-                  <ShimmerBlock className="h-3 w-24" />
-                  <ShimmerBlock className="h-9 w-full rounded" />
-                </div>
               </div>
               <div className="space-y-1.5 col-span-2">
                 <ShimmerBlock className="h-3 w-24" />

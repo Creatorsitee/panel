@@ -2,7 +2,7 @@
 
 # cmnty — Node.js & Python Server Management Panel
 
-**A modern, lightweight, self-hosted server management panel for Node.js and Python applications — built for VPS, Docker, local hosts, and cloud container environments.**
+**A lightweight, self-hosted server management panel for Node.js and Python applications — built for VPS, Docker, local hosts, and cloud containers.**
 
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=nextdotjs)
 ![React](https://img.shields.io/badge/React-19-149ECA?style=flat-square&logo=react)
@@ -24,12 +24,12 @@
 ## Key Features
 
 - **Multi-Runtime Process Supervision** — Run and manage **Node.js** (`node`, `npm`, `npx`, `tsx`, `ts-node`, `nodemon`) and **Python** (`python3`, `python`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `celery`, `hypercorn`, `streamlit`, `pytest`) instances with automatic dependency installation (`package.json` / `requirements.txt`).
-- **Real-Time Streaming Console with jQuery Color Highlighting** — Powered by Server-Sent Events (SSE) with zero-delay partial line flushing, carriage return (`\r`) progress overwrite, **jQuery-powered terminal output text color syntax highlighting** (full ANSI SGR/256-color/truecolor + semantic log badges, HTTP statuses, URLs, timestamps, file paths, JSON keys, and CLI flags), command history (`ArrowUp` / `ArrowDown`), and interactive `stdin` forwarding.
-- **Live Resource Telemetry & Area Charts** — Monitor per-server Address port, Uptime, CPU load, RSS memory (with OOM auto-termination), and inbound/outbound network bandwidth rates with real-time Recharts area graphs, plus a dedicated **Resource Host** page (`/host`) displaying host OS, kernel, CPU load averages, RAM, Swap, Disk usage, panel quota allocations, and installed Node.js/Python/npm/pip versions.
-- **Integrated File Manager & Multi-Language Code Editor** — Browse directories with clickable breadcrumbs, create files/folders, multi-upload files, rename, move (single or bulk), archive to `.zip`, extract `.zip` archives safely, bulk-delete via a floating selection bar, and edit code inline with a **CodeMirror 6 syntax-highlighted editor** supporting 100+ programming, markup, and config languages (JavaScript, TypeScript, TSX/JSX, Python, JSON, YAML, HTML, CSS, Markdown, SQL, Shell, Dockerfile, `.env`, Go, Rust, PHP, etc.) with line numbers, code folding, search (`Ctrl+F` / `Cmd+F`), and `Ctrl+S` / `Cmd+S` save.
-- **Auto-Saving Server Settings** — Configure startup commands, auto-restart behavior, server name/notes, host-bounded memory/CPU allocations, internal ports (admin), and permanent deletion in `/server/[id]/settings`.
-- **Role-Based Access Control (RBAC)** — First registered account is promoted to `admin` automatically (or optionally configured via `ADMIN_USER`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `.env`). Admins manage users (`/admin/user`) and all servers (`/admin/server`), perform remote power actions, transfer server ownership, enforce RAM/CPU limits, and inspect active quotas.
-- **Sandboxed Execution & Session Security** — Strict directory confinement (`resolveSafePath` + symlink realpath checks), `shell: false` process spawning, isolated server environment variables, `scrypt` password hashing, and HMAC-SHA256 cookie + bearer session tokens backed by an automatically generated and persisted `.session-secret`.
+- **Real-Time Streaming Console (jQuery Highlighted)** — Stream logs over Server-Sent Events (SSE) with zero-delay partial line flushing, carriage return (`\r`) progress overwrite, **jQuery-powered ANSI & semantic terminal output color highlighting** (SGR/256-color/RGB, HTTP statuses, URLs, timestamps, file paths, JSON keys, CLI flags), command history (`ArrowUp` / `ArrowDown`), and interactive `stdin` forwarding.
+- **Live Telemetry & Area Charts** — Track per-server Address port, Uptime, CPU load, RSS memory (with OOM auto-termination), and inbound/outbound network bandwidth rates with real-time Recharts area graphs, alongside a dedicated **Resource Host** overview (`/host`) for OS, kernel, load averages, RAM, Swap, Disk, panel quotas, and installed runtime versions.
+- **Integrated File Manager & CodeMirror Editor** — Navigate directories via breadcrumbs, create files/folders, multi-upload files, rename, move (single or bulk), archive/extract `.zip` safely, bulk-delete via a floating action bar, and edit source files inline with a **CodeMirror 6 syntax-highlighted editor** supporting 100+ languages with line numbers, code folding, search (`Ctrl+F` / `Cmd+F`), and `Ctrl+S` / `Cmd+S` save.
+- **Auto-Saving Server Settings** — Update startup commands, auto-restart behavior, server name/notes, internal ports (admin), and permanent deletion in `/server/[id]/settings` with instant auto-save.
+- **Role-Based Access Control (RBAC)** — First registered account is automatically promoted to `admin` (or optionally provisioned via `ADMIN_USER`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `.env`). Admins manage users (`/admin/user`) and servers (`/admin/server`), perform remote power actions, and transfer server ownership.
+- **Sandboxed Execution & Session Security** — Strict directory confinement (`resolveSafePath` + symlink realpath validation), `shell: false` process spawning, isolated server environment variables, `scrypt` password hashing, and HMAC-SHA256 cookie + bearer session tokens backed by an auto-generated `.session-secret`.
 
 ---
 
@@ -42,10 +42,10 @@
 | <img src="docs/screenshots/dashboard.png" alt="Servers Dashboard" width="100%" /> | <img src="docs/screenshots/console.png" alt="Server Console" width="100%" /> |
 | Filter instances by runtime (`Semua Runtime` / `Node.js` / `Python`), search by name or port, and monitor live CPU & RAM usage across all servers. | Power controls (`Start`, `Restart`, `Stop`, `Kill`), live jQuery-highlighted ANSI/semantic log streaming, interactive `stdin` bar, and live CPU/Memory/Network charts. |
 
-| Create Server Modal | Server Settings & Resource Limits |
+| Create Server Modal | Server Settings |
 | :---: | :---: |
 | <img src="docs/screenshots/create-server.png" alt="Create Server Modal" width="100%" /> | <img src="docs/screenshots/settings.png" alt="Server Settings" width="100%" /> |
-| Deploy new Node.js or Python instances with runtime presets, owner assignment, startup command, and host-bounded memory/CPU limits. | Auto-saving startup command, auto-restart toggle, side-by-side server metadata, memory/CPU quotas, internal port, and safe server deletion. |
+| Deploy new Node.js or Python instances with runtime presets, owner assignment, startup command, and host-bounded memory/CPU limits. | Auto-saving startup command, auto-restart toggle, server name & notes, internal port configuration, and safe server deletion. |
 
 ### File Manager, Code Editor & Host Resources
 
@@ -78,7 +78,7 @@
 The console command bar (`Input a command...`) is context-aware and activates **only when the running process actively requests standard input (`stdin`)**:
 
 - **Interactive Input Detection:** Built-in runtime hooks automatically detect when a Node.js (`readline`, `process.stdin`, `fs.readSync(0)`) or Python (`input()`, `sys.stdin`, `os.read(0)`) process waits for user input, enabling the input bar in real time via SSE.
-- **Disabled When Idle or Non-Interactive:** When a server is offline, stopping, or running a background HTTP/bot loop that does not read from `stdin`, the command input remains safely locked.
+- **Disabled When Idle:** When a server is offline, stopping, or running a background HTTP/bot loop that does not read from `stdin`, the command input remains safely locked.
 - **Command History:** Use `ArrowUp` and `ArrowDown` to recall previously sent `stdin` lines during interactive prompts (persisted per server in browser `localStorage`).
 
 ---
@@ -100,11 +100,9 @@ docker run -d \
   cmnty-panel
 ```
 
----
-
 ### Option 2: Ubuntu / Debian VPS (`install.sh`)
 
-Run the automated installer script as `root` or via `sudo` to provision Node.js 22 LTS, Python 3, `pip`, `venv`, swap (if RAM < 2 GB), production build, and a `systemd` service:
+Run the automated installer as `root` or via `sudo` to provision Node.js 22 LTS, Python 3, `pip`, `venv`, swap (when RAM < 2 GB), production build, a `systemd` service, and automatic public VPS IPv4 URL detection:
 
 ```bash
 git clone <your-repository-url> cmnty
@@ -112,15 +110,13 @@ cd cmnty
 sudo bash install.sh
 ```
 
-Useful service management commands after installation:
+Useful service management commands:
 
 ```bash
 sudo systemctl status cmnty-panel
 sudo journalctl -u cmnty-panel -f
 sudo systemctl restart cmnty-panel
 ```
-
----
 
 ### Option 3: Local Development
 
@@ -132,31 +128,29 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser and create the first account (automatically assigned the `admin` role).
-
----
+Open [http://localhost:3000](http://localhost:3000) and register the first account (automatically assigned the `admin` role).
 
 ### Option 4: Railway
 
-This repository includes a production-hardened `Dockerfile` configured for Railway's dynamic `PORT` and persistent volumes.
+This repository includes a production `Dockerfile` configured for Railway's dynamic `PORT` and persistent volumes:
 
 1. Push this repository to GitHub and create a **New Project → Deploy from GitHub Repo** on [Railway](https://railway.app).
 2. Add a **Volume** mounted at `/app/data` so user accounts, server configurations, `.session-secret`, and server workspaces persist across deployments.
-3. Optionally set Variables in Railway:
+3. Optionally configure Variables in Railway:
    - `APP_URL` — your Railway public URL (e.g. `https://your-app.up.railway.app`)
    - `ADMIN_USER`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` — optional pre-configured administrator account
-4. Deploy. Railway builds the Docker image and starts the panel on `0.0.0.0:$PORT`.
+4. Deploy. Railway builds the Docker image and binds to `0.0.0.0:$PORT`.
 
 ---
 
 ## Environment Variables
 
-See [`.env`](.env) for the configuration file:
+See [`.env`](.env) for configuration options:
 
 | Variable | Required | Default | Description |
 | :--- | :---: | :--- | :--- |
-| `PANEL_DATA_DIR` | Optional | `./data` | Custom directory path for `panel-db.json`, `.session-secret`, and per-server workspaces. |
-| `ADMIN_USER` | Optional | `Admin` | Display name for an optional pre-configured administrator account (requires `ADMIN_EMAIL` and `ADMIN_PASSWORD`). |
+| `PANEL_DATA_DIR` | Optional | `./data` | Custom directory path for `panel-db.json`, `.session-secret`, and server workspaces. |
+| `ADMIN_USER` | Optional | `Admin` | Display name for an optional pre-configured administrator account (requires `ADMIN_EMAIL` & `ADMIN_PASSWORD`). |
 | `ADMIN_EMAIL` | Optional | — | Email address for the optional environment-configured administrator account. |
 | `ADMIN_PASSWORD` | Optional | — | Password (6–128 chars) for the optional environment-configured administrator account. |
 | `APP_URL` | Optional | `RAILWAY_PUBLIC_DOMAIN` or `http://localhost:3000` | Public origin URL used for metadata, `robots.txt`, and `sitemap.xml`. |
@@ -169,11 +163,11 @@ See [`.env`](.env) for the configuration file:
 
 - **Framework:** Next.js 15 (App Router), React 19, TypeScript
 - **Styling & UI:** Tailwind CSS v4, Lucide Icons, Motion, Recharts, SweetAlert2
-- **Code Editor:** CodeMirror 6 (`@codemirror/view`, `@codemirror/state`, `@codemirror/language`, `@codemirror/language-data`, `@codemirror/commands`, `@codemirror/search`, `@codemirror/theme-one-dark`) for synchronous multi-language syntax highlighting
-- **Console Text Highlighting:** jQuery (`jquery`) dedicated strictly to rendering colored ANSI & semantic output spans inside the terminal console
+- **Code Editor:** CodeMirror 6 (`@codemirror/view`, `@codemirror/state`, `@codemirror/language`, `@codemirror/language-data`, `@codemirror/commands`, `@codemirror/search`, `@codemirror/theme-one-dark`)
+- **Console Highlighting:** jQuery (`jquery`) dedicated strictly to colored ANSI & semantic terminal output spans
 - **Real-Time Streaming:** Native Node.js `ReadableStream` Server-Sent Events (SSE)
-- **Persistence:** Atomic JSON datastore (`data/panel-db.json`) with write serialization lock and auto-generated `.session-secret`
-- **Process Supervision:** Native `node:child_process` tree manager with Linux `/proc` & cgroup resource sampling, socket-level network byte counters, and `stdin` activity hooks
+- **Persistence:** Atomic JSON datastore (`data/panel-db.json`) with write lock and auto-generated `.session-secret`
+- **Process Supervision:** Native `node:child_process` tree manager with Linux `/proc` & cgroup sampling, network rate counters, and `stdin` hooks
 
 ---
 
@@ -190,7 +184,7 @@ See [`.env`](.env) for the configuration file:
 │   ├── console-jquery-highlight.tsx # jQuery-based terminal output text colorizer
 │   ├── server-console.tsx           # Real-time SSE console, power controls & Recharts telemetry
 │   ├── server-files.tsx             # File manager (CRUD, upload, bulk actions, ZIP, CodeEditor)
-│   ├── server-settings.tsx          # Auto-saving runtime, resource & port configuration
+│   ├── server-settings.tsx          # Auto-saving startup, metadata, port & deletion settings
 │   ├── host-resources.tsx           # Host hardware, quota & runtime overview
 │   ├── admin-panel.tsx              # Admin user & server management views
 │   └── ...                          # Shell, dashboard, auth form, modals & skeletons
