@@ -137,7 +137,7 @@ const sockPath = process.env.CMNTY_NET_SOCK;
 const scriptPath = process.argv[1] || '';
 const isPackageRunner = /(?:^|[\\/\\\\])(?:npm|npx)-cli\\.js$|(?:^|[\\/\\\\])(?:yarn|pnpm)\\.(?:c?js|mjs)$/i.test(scriptPath);
 
-if (sockPath && !isPackageRunner) {
+if (sockPath) {
   try {
     const dgram = require('dgram');
     const trackedSockets = new Set();
@@ -148,12 +148,14 @@ if (sockPath && !isPackageRunner) {
     let lastSentRx = -1;
     let lastSentTx = -1;
     let netTimer = null;
+    let netKickTimer = null;
 
     function sendHookPayload(payload) {
       try {
         const conn = net.createConnection(sockPath, () => {
           conn.end(JSON.stringify(payload) + '\\n');
         });
+        conn._cmntyInternalHook = true;
         conn.on('error', () => {});
         conn.unref();
       } catch {}
@@ -166,8 +168,9 @@ if (sockPath && !isPackageRunner) {
       sendHookPayload({ pid: process.pid, netRxBytes: rx, netTxBytes: tx });
     }
 
-    try {
-      const fsMod = require('fs');
+    if (!isPackageRunner) {
+      try {
+        const fsMod = require('fs');
       let lastSentStdinActive = false;
       let stdinOffTimer = null;
       let stdinResumed = false;
@@ -269,7 +272,8 @@ if (sockPath && !isPackageRunner) {
         }
         return origRead.apply(this, [fd, ...rest]);
       };
-    } catch {}
+      } catch {}
+    }
 
     function flushNetSample() {
       let rx = closedRxBytes + udpRxBytes;
@@ -284,13 +288,42 @@ if (sockPath && !isPackageRunner) {
     }
 
     function ensureNetTimer() {
-      if (netTimer) return;
-      netTimer = setInterval(flushNetSample, 800);
-      if (netTimer.unref) netTimer.unref();
+      if (!netTimer) {
+        netTimer = setInterval(flushNetSample, 400);
+        if (netTimer.unref) netTimer.unref();
+      }
+      if (!netKickTimer) {
+        netKickTimer = setTimeout(() => {
+          netKickTimer = null;
+          flushNetSample();
+        }, 120);
+        if (netKickTimer.unref) netKickTimer.unref();
+      }
+    }
+
+    process.once('beforeExit', flushNetSample);
+
+    function extractConnectTarget(args) {
+      let cur = args[0];
+      while (Array.isArray(cur)) {
+        cur = cur[0];
+      }
+      return cur;
+    }
+
+    function isInternalOrPipeConnect(args) {
+      const target = extractConnectTarget(args);
+      if (typeof target === 'string') return true;
+      if (target && typeof target === 'object') {
+        if (target.path === sockPath) return true;
+        if (typeof target.path === 'string' && !target.port && !target.host) return true;
+        if (typeof target.fd === 'number') return true;
+      }
+      return false;
     }
 
     function trackTcpSocket(sock) {
-      if (!sock || sock._cmntyNetTracked || sock._parent) return;
+      if (!sock || sock._cmntyNetTracked || sock._parent || sock._cmntyInternalHook) return;
       sock._cmntyNetTracked = true;
       trackedSockets.add(sock);
       ensureNetTimer();
@@ -306,11 +339,7 @@ if (sockPath && !isPackageRunner) {
 
     const origConnect = net.Socket.prototype.connect;
     net.Socket.prototype.connect = function (...args) {
-      const first = args[0];
-      const isUnix =
-        typeof first === 'string' ||
-        (first && typeof first === 'object' && typeof first.path === 'string' && !first.port && !first.host);
-      if (!isUnix) {
+      if (!this._cmntyInternalHook && !isInternalOrPipeConnect(args)) {
         trackTcpSocket(this);
       }
       return origConnect.apply(this, args);
@@ -339,6 +368,13 @@ if (sockPath && !isPackageRunner) {
         if (typeof msg === 'string' || Buffer.isBuffer(msg) || ArrayBuffer.isView(msg)) {
           const offset = typeof rest[0] === 'number' && typeof rest[1] === 'number' ? rest[1] : msg.byteLength ?? msg.length;
           udpTxBytes += Math.max(0, Number(offset) || 0);
+          ensureNetTimer();
+        } else if (Array.isArray(msg)) {
+          let total = 0;
+          for (const part of msg) {
+            if (part && typeof part.length === 'number') total += part.length;
+          }
+          udpTxBytes += total;
           ensureNetTimer();
         }
       } catch {}
@@ -374,7 +410,7 @@ if _sock_path:
             last_rx = -1
             last_tx = -1
             while True:
-                time.sleep(0.8)
+                time.sleep(0.4)
                 with _net_lock:
                     rx = _net_rx
                     tx = _net_tx
@@ -464,6 +500,39 @@ if _sock_path:
                 return n
 
         _stdlib_socket.socket = _CmntyTrackedSocket
+
+        try:
+            import ssl as _ssl
+
+            _orig_ssl_read = _ssl.SSLSocket.read
+            _orig_ssl_write = _ssl.SSLSocket.write
+            _orig_ssl_send = _ssl.SSLSocket.send
+
+            def _cmnty_ssl_read(self, *args, **kwargs):
+                res = _orig_ssl_read(self, *args, **kwargs)
+                if getattr(self, "_sslobj", None) is not None:
+                    n = res if isinstance(res, int) else (len(res) if res else 0)
+                    if n > 0:
+                        _add_rx(n)
+                return res
+
+            def _cmnty_ssl_write(self, data):
+                n = _orig_ssl_write(self, data)
+                if getattr(self, "_sslobj", None) is not None and n and n > 0:
+                    _add_tx(n)
+                return n
+
+            def _cmnty_ssl_send(self, data, flags=0):
+                n = _orig_ssl_send(self, data, flags)
+                if getattr(self, "_sslobj", None) is not None and n and n > 0:
+                    _add_tx(n)
+                return n
+
+            _ssl.SSLSocket.read = _cmnty_ssl_read
+            _ssl.SSLSocket.write = _cmnty_ssl_write
+            _ssl.SSLSocket.send = _cmnty_ssl_send
+        except Exception:
+            pass
 
         try:
             import builtins as _builtins
@@ -1041,6 +1110,13 @@ function buildSafeEnv(
     HOME: cwd,
     LANG: process.env.LANG || 'C.UTF-8',
     TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    FORCE_COLOR: '1',
+    CLICOLOR: '1',
+    CLICOLOR_FORCE: '1',
+    NPM_CONFIG_COLOR: 'always',
+    npm_config_color: 'always',
+    PY_COLORS: '1',
     PYTHONUNBUFFERED: '1',
     PYTHONIOENCODING: 'utf-8',
     NODE_ENV: diskEnv.NODE_ENV || 'production',
@@ -1078,13 +1154,14 @@ function runProcessCommand(
   serverId: string,
   cwd: string,
   executable: string,
-  args: string[]
+  args: string[],
+  netMonitor?: { sockPath: string }
 ): Promise<void> {
   const state = getOrCreateState(serverId);
   return new Promise<void>((resolve, reject) => {
     const child = spawn(executable, args, {
       cwd,
-      env: buildSafeEnv(serverId),
+      env: buildSafeEnv(serverId, netMonitor),
       shell: false,
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1214,10 +1291,18 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
     emitStatus(server.id);
     appendLog(server.id, 'system', 'Installing dependencies from package.json (npm install)...');
 
+    const netMonitor = await setupNetMonitor(server.id, state);
     try {
-      await runProcessCommand(server.id, cwd, 'npm', ['install', '--no-audit', '--no-fund']);
+      await runProcessCommand(
+        server.id,
+        cwd,
+        'npm',
+        ['install', '--no-audit', '--no-fund'],
+        netMonitor
+      );
       appendLog(server.id, 'system', 'Dependencies from package.json installed successfully.');
     } catch (err) {
+      cleanupNetMonitor(state);
       if (state.manualStop) {
         state.status = 'stopped';
         state.pid = null;
@@ -1260,11 +1345,12 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
   emitStatus(server.id);
   appendLog(server.id, 'system', 'Installing dependencies from requirements.txt...');
 
+  const netMonitor = await setupNetMonitor(server.id, state);
   const venvPip = path.join(cwd, '.venv', 'bin', 'pip');
   try {
     if (!fs.existsSync(venvPip)) {
       try {
-        await runProcessCommand(server.id, cwd, 'python3', ['-m', 'venv', '.venv']);
+        await runProcessCommand(server.id, cwd, 'python3', ['-m', 'venv', '.venv'], netMonitor);
       } catch (venvErr) {
         if (state.manualStop) throw venvErr;
         if (fs.existsSync(path.join(cwd, '.venv'))) {
@@ -1278,40 +1364,37 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
     }
 
     if (fs.existsSync(venvPip)) {
-      await runProcessCommand(server.id, cwd, venvPip, [
-        'install',
-        '--no-cache-dir',
-        '-r',
-        'requirements.txt',
-      ]);
+      await runProcessCommand(
+        server.id,
+        cwd,
+        venvPip,
+        ['install', '--no-cache-dir', '-r', 'requirements.txt'],
+        netMonitor
+      );
       appendLog(server.id, 'system', 'Dependencies from requirements.txt installed into .venv.');
       return;
     }
 
     if (hasCommandOnSystem('pip3', ['--version'])) {
-      await runProcessCommand(server.id, cwd, 'pip3', [
-        'install',
-        '--no-cache-dir',
-        '--target',
-        '.py_packages',
-        '-r',
-        'requirements.txt',
-      ]);
+      await runProcessCommand(
+        server.id,
+        cwd,
+        'pip3',
+        ['install', '--no-cache-dir', '--target', '.py_packages', '-r', 'requirements.txt'],
+        netMonitor
+      );
       appendLog(server.id, 'system', 'Dependencies from requirements.txt installed successfully.');
       return;
     }
 
     if (hasCommandOnSystem('python3', ['-m', 'pip', '--version'])) {
-      await runProcessCommand(server.id, cwd, 'python3', [
-        '-m',
-        'pip',
-        'install',
-        '--no-cache-dir',
-        '--target',
-        '.py_packages',
-        '-r',
-        'requirements.txt',
-      ]);
+      await runProcessCommand(
+        server.id,
+        cwd,
+        'python3',
+        ['-m', 'pip', 'install', '--no-cache-dir', '--target', '.py_packages', '-r', 'requirements.txt'],
+        netMonitor
+      );
       appendLog(server.id, 'system', 'Dependencies from requirements.txt installed successfully.');
       return;
     }
@@ -1320,6 +1403,7 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
       'Found requirements.txt, but neither pip3 nor python3-venv is available on the host system.'
     );
   } catch (err) {
+    cleanupNetMonitor(state);
     if (state.manualStop) {
       state.status = 'stopped';
       state.pid = null;

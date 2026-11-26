@@ -1,8 +1,8 @@
 <div align="center">
 
-# cmnty — Node.js & Python Server Management Panel
+# cmnty — Panel Manajemen Server Node.js & Python
 
-**A lightweight, self-hosted server management panel for Node.js and Python applications — built for VPS, Docker, local hosts, and cloud containers.**
+**Panel manajemen server mandiri (self-hosted) yang ringan untuk aplikasi Node.js dan Python — dirancang untuk VPS, Docker, host lokal, dan kontainer cloud.**
 
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=nextdotjs)
 ![React](https://img.shields.io/badge/React-19-149ECA?style=flat-square&logo=react)
@@ -11,87 +11,87 @@
 ![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?style=flat-square&logo=nodedotjs)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python)
 
-[Features](#key-features) • [Screenshots](#screenshots) • [Interactive Console](#interactive-console) • [Deployment](#deployment) • [Environment Variables](#environment-variables) • [Project Structure](#project-structure)
+[Fitur Utama](#fitur-utama) • [Tangkapan Layar](#tangkapan-layar) • [Konsol Interaktif](#konsol-interaktif) • [Deployment](#deployment) • [Variabel Lingkungan](#variabel-lingkungan) • [Struktur Proyek](#struktur-proyek)
 
 <br />
 
-<img src="docs/screenshots/console.png" alt="cmnty Real-Time Server Console" width="100%" />
+<img src="docs/screenshots/console.png" alt="Konsol Server Real-Time cmnty" width="100%" />
 
 </div>
 
 ---
 
-## Key Features
+## Fitur Utama
 
-- **Multi-Runtime Process Supervision** — Run and manage **Node.js** (`node`, `npm`, `npx`, `tsx`, `ts-node`, `nodemon`) and **Python** (`python3`, `python`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `celery`, `hypercorn`, `streamlit`, `pytest`) instances with automatic dependency installation (`package.json` / `requirements.txt`).
-- **Real-Time Streaming Console (jQuery Highlighted)** — Stream logs over Server-Sent Events (SSE) with zero-delay partial line flushing, carriage return (`\r`) progress overwrite, **jQuery-powered ANSI & semantic terminal output color highlighting** (SGR/256-color/RGB, HTTP statuses, URLs, timestamps, file paths, JSON keys, CLI flags), command history (`ArrowUp` / `ArrowDown`), and interactive `stdin` forwarding.
-- **Live Telemetry & Area Charts** — Track per-server Address port, Uptime, CPU load, RSS memory (with OOM auto-termination), and inbound/outbound network bandwidth rates with real-time Recharts area graphs, alongside a dedicated **Resource Host** overview (`/host`) for OS, kernel, load averages, RAM, Swap, Disk, panel quotas, and installed runtime versions.
-- **Integrated File Manager & CodeMirror Editor** — Navigate directories via breadcrumbs, create files/folders, multi-upload files, rename, move (single or bulk), archive/extract `.zip` safely, bulk-delete via a floating action bar, and edit source files inline with a **CodeMirror 6 syntax-highlighted editor** supporting 100+ languages with line numbers, code folding, search (`Ctrl+F` / `Cmd+F`), and `Ctrl+S` / `Cmd+S` save.
-- **Auto-Saving Server Settings** — Update startup commands, auto-restart behavior, server name/notes, internal ports (admin), and permanent deletion in `/server/[id]/settings` with instant auto-save.
-- **Role-Based Access Control (RBAC)** — First registered account is automatically promoted to `admin` (or optionally provisioned via `ADMIN_USER`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `.env`). Admins manage users (`/admin/user`) and servers (`/admin/server`), perform remote power actions, and transfer server ownership.
-- **Sandboxed Execution & Session Security** — Strict directory confinement (`resolveSafePath` + symlink realpath validation), `shell: false` process spawning, isolated server environment variables, `scrypt` password hashing, and HMAC-SHA256 cookie + bearer session tokens backed by an auto-generated `.session-secret`.
-
----
-
-## Screenshots
-
-### Server Dashboard, Deployment & Live Console
-
-| Servers Dashboard | Real-Time Console & Telemetry |
-| :---: | :---: |
-| <img src="docs/screenshots/dashboard.png" alt="Servers Dashboard" width="100%" /> | <img src="docs/screenshots/console.png" alt="Server Console" width="100%" /> |
-| Filter instances by runtime (`Semua Runtime` / `Node.js` / `Python`), search by name or port, and monitor live CPU & RAM usage across all servers. | Power controls (`Start`, `Restart`, `Stop`, `Kill`), live jQuery-highlighted ANSI/semantic log streaming, interactive `stdin` bar, and live CPU/Memory/Network charts. |
-
-| Create Server Modal | Server Settings |
-| :---: | :---: |
-| <img src="docs/screenshots/create-server.png" alt="Create Server Modal" width="100%" /> | <img src="docs/screenshots/settings.png" alt="Server Settings" width="100%" /> |
-| Deploy new Node.js or Python instances with runtime presets, owner assignment, startup command, and host-bounded memory/CPU limits. | Auto-saving startup command, auto-restart toggle, server name & notes, internal port configuration, and safe server deletion. |
-
-### File Manager, Code Editor & Host Resources
-
-| Integrated File Manager | Multi-Language CodeMirror Editor |
-| :---: | :---: |
-| <img src="docs/screenshots/files.png" alt="File Manager" width="100%" /> | <img src="docs/screenshots/code-editor.png" alt="CodeMirror Code Editor" width="100%" /> |
-| Browse directories via breadcrumbs, create files/folders, multi-upload, rename, move, archive/extract `.zip`, and bulk-delete files safely. | Inline CodeMirror 6 editor with syntax highlighting for 100+ languages, line numbers, code folding, search (`Ctrl+F`), and `Ctrl+S` save. |
-
-| Host System & Runtime Overview | Authentication Screen |
-| :---: | :---: |
-| <img src="docs/screenshots/host-resources.png" alt="Host Resources" width="100%" /> | <img src="docs/screenshots/login.png" alt="Login Screen" width="100%" /> |
-| Inspect host OS, kernel, CPU load, system/cgroup memory, swap, disk usage, allocated panel quotas, and installed Node.js/Python/npm/pip versions. | Clean sign-in and registration screen with automatic first-admin onboarding and cookie + bearer session support. |
-
-### Administration & Mobile Responsive UI
-
-| Admin Server Management (`/admin/server`) | Admin User Management (`/admin/user`) |
-| :---: | :---: |
-| <img src="docs/screenshots/admin.png" alt="Admin Server Management" width="100%" /> | <img src="docs/screenshots/admin-users.png" alt="Admin User Management" width="100%" /> |
-| Audit all servers, filter by status, monitor live RAM/CPU consumption, trigger remote power actions, or transfer ownership. | Manage user accounts, assign `ADMIN` or `USER` roles, inspect per-user server counts, and audit active panel quotas. |
-
-| Mobile Responsive Dashboard | Mobile Responsive Console |
-| :---: | :---: |
-| <img src="docs/screenshots/mobile-dashboard.png" alt="Mobile Dashboard" width="320" /> | <img src="docs/screenshots/mobile-console.png" alt="Mobile Console" width="320" /> |
-| Clean single-column server cards, runtime filters, and slide-out drawer navigation tuned for mobile screens. | Side-by-side 4-button power bar, responsive terminal logs, and 2-column telemetry cards without horizontal overflow. |
+- **Supervisi Proses Multi-Runtime** — Jalankan dan kelola instance **Node.js** (`node`, `npm`, `npx`, `tsx`, `ts-node`, `nodemon`) dan **Python** (`python3`, `python`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `celery`, `hypercorn`, `streamlit`, `pytest`) dengan instalasi dependensi otomatis (`package.json` / `requirements.txt`).
+- **Konsol Streaming Real-Time (Highlight jQuery)** — Streaming log melalui Server-Sent Events (SSE) dengan zero-delay partial line flushing, carriage return (`\r`) progress overwrite, **highlight warna terminal output ANSI & semantik berbasis jQuery** (SGR/256-color/RGB, status HTTP, URL, timestamp, jalur file, key JSON, flag CLI), riwayat perintah (`ArrowUp` / `ArrowDown`), dan penerusan `stdin` interaktif.
+- **Telemetri Langsung & Grafik Area** — Lacak port Address per server, Uptime, beban CPU, memori RSS (dengan auto-terminasi OOM), dan laju bandwidth jaringan masuk/keluar dengan grafik area Recharts waktu nyata, serta ringkasan **Resource Host** khusus (`/host`) untuk OS, kernel, rata-rata beban, RAM, Swap, Disk, kuota panel, dan versi runtime terinstal.
+- **Manajer File Terintegrasi & Editor CodeMirror** — Navigasi direktori melalui breadcrumbs, buat file/folder, multi-upload file, ubah nama, pindahkan (tunggal atau massal), arsip/ekstrak `.zip` dengan aman, hapus massal melalui action bar melayang, dan edit file sumber secara inline dengan **editor ber-highlight syntax CodeMirror 6** yang mendukung 100+ bahasa dengan nomor baris, pelipatan kode, pencarian (`Ctrl+F` / `Cmd+F`), dan penyimpanan `Ctrl+S` / `Cmd+S`.
+- **Pengaturan Server Simpan-Otomatis** — Perbarui perintah startup, perilaku auto-restart, nama/catatan server, port internal (admin), dan penghapusan aman di `/server/[id]/settings` dengan penyimpanan otomatis instan.
+- **Kontrol Akses Berbasis Peran (RBAC)** — Akun pertama yang terdaftar secara otomatis dipromosikan menjadi `admin` (atau opsional melalui `ADMIN_USER`, `ADMIN_EMAIL`, dan `ADMIN_PASSWORD` di `.env`). Admin mengelola pengguna (`/admin/user`) dan server (`/admin/server`), melakukan tindakan power jarak jauh, dan mentransfer kepemilikan server.
+- **Eksekusi Terisolasi (Sandbox) & Keamanan Sesi** — Pembatasan direktori ketat (`resolveSafePath` + validasi symlink realpath), pemijahan proses `shell: false`, variabel lingkungan server terisolasi, hashing password `scrypt`, serta token sesi cookie + bearer HMAC-SHA256 yang didukung oleh `.session-secret` yang dibuat otomatis.
 
 ---
 
-## Interactive Console
+## Tangkapan Layar
 
-The console command bar (`Input a command...`) is context-aware and activates **only when the running process actively requests standard input (`stdin`)**:
+### Dasbor Server, Deployment & Konsol Langsung
 
-- **Interactive Input Detection:** Built-in runtime hooks automatically detect when a Node.js (`readline`, `process.stdin`, `fs.readSync(0)`) or Python (`input()`, `sys.stdin`, `os.read(0)`) process waits for user input, enabling the input bar in real time via SSE.
-- **Disabled When Idle:** When a server is offline, stopping, or running a background HTTP/bot loop that does not read from `stdin`, the command input remains safely locked.
-- **Command History:** Use `ArrowUp` and `ArrowDown` to recall previously sent `stdin` lines during interactive prompts (persisted per server in browser `localStorage`).
+| Dasbor Server | Konsol & Telemetri Real-Time |
+| :---: | :---: |
+| <img src="docs/screenshots/dashboard.png" alt="Dasbor Server" width="100%" /> | <img src="docs/screenshots/console.png" alt="Konsol Server" width="100%" /> |
+| Filter instance berdasarkan runtime (`Semua Runtime` / `Node.js` / `Python`), cari berdasarkan nama atau port, dan pantau penggunaan CPU & RAM secara langsung di semua server. | Kontrol daya (`Start`, `Restart`, `Stop`, `Kill`), streaming log ANSI/semantik ber-highlight jQuery, bar `stdin` interaktif, serta grafik CPU/Memory/Network langsung. |
+
+| Modal Buat Server | Pengaturan Server |
+| :---: | :---: |
+| <img src="docs/screenshots/create-server.png" alt="Modal Buat Server" width="100%" /> | <img src="docs/screenshots/settings.png" alt="Pengaturan Server" width="100%" /> |
+| Deploy instance Node.js atau Python baru dengan preset runtime, penugasan pemilik, perintah startup, dan batas memori/CPU yang dibatasi host. | Perintah startup simpan-otomatis, toggle auto-restart, nama & catatan server, konfigurasi port internal, dan penghapusan server yang aman. |
+
+### Manajer File, Editor Kode & Sumber Daya Host
+
+| Manajer File Terintegrasi | Editor Kode CodeMirror Multi-Bahasa |
+| :---: | :---: |
+| <img src="docs/screenshots/files.png" alt="Manajer File" width="100%" /> | <img src="docs/screenshots/code-editor.png" alt="Editor Kode CodeMirror" width="100%" /> |
+| Jelajahi direktori melalui breadcrumbs, buat file/folder, multi-upload, ubah nama, pindahkan, arsip/ekstrak `.zip`, dan hapus file massal dengan aman. | Editor CodeMirror 6 inline dengan highlight syntax untuk 100+ bahasa, nomor baris, pelipatan kode, pencarian (`Ctrl+F`), dan penyimpanan `Ctrl+S`. |
+
+| Ikhtisar Sistem Host & Runtime | Layar Autentikasi |
+| :---: | :---: |
+| <img src="docs/screenshots/host-resources.png" alt="Sumber Daya Host" width="100%" /> | <img src="docs/screenshots/login.png" alt="Layar Masuk" width="100%" /> |
+| Periksa OS host, kernel, beban CPU, memori sistem/cgroup, swap, penggunaan disk, kuota panel yang dialokasikan, dan versi Node.js/Python/npm/pip yang terinstal. | Layar masuk dan pendaftaran yang bersih dengan orientasi admin pertama otomatis serta dukungan sesi cookie + bearer. |
+
+### Administrasi & UI Responsif Seluler
+
+| Manajemen Server Admin (`/admin/server`) | Manajemen Pengguna Admin (`/admin/user`) |
+| :---: | :---: |
+| <img src="docs/screenshots/admin.png" alt="Manajemen Server Admin" width="100%" /> | <img src="docs/screenshots/admin-users.png" alt="Manajemen Pengguna Admin" width="100%" /> |
+| Audit semua server, filter berdasarkan status, pantau konsumsi RAM/CPU secara langsung, picu tindakan power jarak jauh, atau transfer kepemilikan. | Kelola akun pengguna, tetapkan peran `ADMIN` atau `USER`, periksa jumlah server per pengguna, dan audit kuota panel aktif. |
+
+| Dasbor Responsif Seluler | Konsol Responsif Seluler |
+| :---: | :---: |
+| <img src="docs/screenshots/mobile-dashboard.png" alt="Dasbor Seluler" width="320" /> | <img src="docs/screenshots/mobile-console.png" alt="Konsol Seluler" width="320" /> |
+| Kartu server satu kolom yang rapi, filter runtime, dan navigasi laci slide-out yang dioptimalkan untuk layar ponsel. | Bar power 4 tombol berdampingan, log terminal responsif, dan kartu telemetri 2 kolom tanpa luapan horizontal. |
+
+---
+
+## Konsol Interaktif
+
+Bar perintah konsol (`Input a command...`) bersifat sadar konteks dan aktif **hanya ketika proses yang berjalan secara aktif meminta input standar (`stdin`)**:
+
+- **Deteksi Input Interaktif:** Hook runtime bawaan mendeteksi secara otomatis ketika proses Node.js (`readline`, `process.stdin`, `fs.readSync(0)`) atau Python (`input()`, `sys.stdin`, `os.read(0)`) menunggu input pengguna, mengaktifkan bar input secara real-time melalui SSE.
+- **Dinonaktifkan Saat Idle:** Ketika server offline, berhenti, atau menjalankan loop HTTP/bot latar belakang yang tidak membaca dari `stdin`, input perintah tetap terkunci dengan aman.
+- **Riwayat Perintah:** Gunakan `ArrowUp` dan `ArrowDown` untuk memanggil kembali baris `stdin` yang dikirimkan sebelumnya selama prompt interaktif (disimpan per server di `localStorage` peramban).
 
 ---
 
 ## Deployment
 
-### Option 1: Docker
+### Opsi 1: Docker
 
 ```bash
-# Build the production image
+# Build image produksi
 docker build -t cmnty-panel .
 
-# Run with persistent data storage
+# Jalankan dengan penyimpanan data persisten
 docker run -d \
   --name cmnty-panel \
   --restart unless-stopped \
@@ -100,17 +100,17 @@ docker run -d \
   cmnty-panel
 ```
 
-### Option 2: Ubuntu / Debian VPS (`install.sh`)
+### Opsi 2: VPS Ubuntu / Debian (`install.sh`)
 
-Run the automated installer as `root` or via `sudo` to provision Node.js 22 LTS, Python 3, `pip`, `venv`, swap (when RAM < 2 GB), production build, a `systemd` service, and automatic public VPS IPv4 URL detection:
+Jalankan instalasi otomatis sebagai `root` atau melalui `sudo` untuk memprovisi Node.js 22 LTS, Python 3, `pip`, `venv`, swap (jika RAM < 2 GB), build produksi, layanan `systemd`, dan deteksi otomatis URL IPv4 publik VPS:
 
 ```bash
-git clone <your-repository-url> cmnty
+git clone <url-repositori-anda> cmnty
 cd cmnty
 sudo bash install.sh
 ```
 
-Useful service management commands:
+Perintah manajemen layanan yang berguna:
 
 ```bash
 sudo systemctl status cmnty-panel
@@ -118,97 +118,97 @@ sudo journalctl -u cmnty-panel -f
 sudo systemctl restart cmnty-panel
 ```
 
-### Option 3: Local Development
+### Opsi 3: Pengembangan Lokal
 
-**Prerequisites:** Node.js `20+` (22 LTS recommended) and Python `3.10+`.
+**Prasyarat:** Node.js `20+` (disarankan 22 LTS) dan Python `3.10+`.
 
 ```bash
 npm install
-# Optionally edit .env to pre-configure ADMIN_* or PANEL_DATA_DIR
+# Opsional: edit file .env untuk pra-konfigurasi ADMIN_* atau PANEL_DATA_DIR
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and register the first account (automatically assigned the `admin` role).
+Buka [http://localhost:3000](http://localhost:3000) dan daftarkan akun pertama (secara otomatis diberi peran `admin`).
 
-### Option 4: Railway
+### Opsi 4: Railway
 
-This repository includes a production `Dockerfile` configured for Railway's dynamic `PORT` and persistent volumes:
+Repositori ini mencakup `Dockerfile` produksi yang dikonfigurasi untuk `PORT` dinamis Railway dan volume persisten:
 
-1. Push this repository to GitHub and create a **New Project → Deploy from GitHub Repo** on [Railway](https://railway.app).
-2. Add a **Volume** mounted at `/app/data` so user accounts, server configurations, `.session-secret`, and server workspaces persist across deployments.
-3. Optionally configure Variables in Railway:
-   - `APP_URL` — your Railway public URL (e.g. `https://your-app.up.railway.app`)
-   - `ADMIN_USER`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` — optional pre-configured administrator account
-4. Deploy. Railway builds the Docker image and binds to `0.0.0.0:$PORT`.
+1. Dorong repositori ini ke GitHub dan buat **New Project → Deploy from GitHub Repo** di [Railway](https://railway.app).
+2. Tambahkan **Volume** yang dipasang di `/app/data` sehingga akun pengguna, konfigurasi server, `.session-secret`, dan workspace server bertahan di setiap deployment.
+3. Opsional: Konfigurasikan Variabel di Railway:
+   - `APP_URL` — URL publik Railway Anda (mis. `https://your-app.up.railway.app`)
+   - `ADMIN_USER`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` — akun administrator opsional yang telah dikonfigurasi sebelumnya
+4. Deploy. Railway mem-build image Docker dan mengikat ke `0.0.0.0:$PORT`.
 
 ---
 
-## Environment Variables
+## Variabel Lingkungan
 
-See [`.env`](.env) for configuration options:
+Lihat [`.env`](.env) untuk opsi konfigurasi:
 
-| Variable | Required | Default | Description |
+| Variabel | Wajib | Default | Deskripsi |
 | :--- | :---: | :--- | :--- |
-| `PANEL_DATA_DIR` | Optional | `./data` | Custom directory path for `panel-db.json`, `.session-secret`, and server workspaces. |
-| `ADMIN_USER` | Optional | `Admin` | Display name for an optional pre-configured administrator account (requires `ADMIN_EMAIL` & `ADMIN_PASSWORD`). |
-| `ADMIN_EMAIL` | Optional | — | Email address for the optional environment-configured administrator account. |
-| `ADMIN_PASSWORD` | Optional | — | Password (6–128 chars) for the optional environment-configured administrator account. |
-| `APP_URL` | Optional | `RAILWAY_PUBLIC_DOMAIN` or `http://localhost:3000` | Public origin URL used for metadata, `robots.txt`, and `sitemap.xml`. |
-| `PORT` | Optional | `3000` | HTTP port bound by the Next.js server. |
-| `NODE_ENV` | Production | `production` | Runtime mode (`production` for deployments). |
+| `PANEL_DATA_DIR` | Opsional | `./data` | Jalur direktori kustom untuk `panel-db.json`, `.session-secret`, dan workspace server. |
+| `ADMIN_USER` | Opsional | `Admin` | Nama tampilan untuk akun administrator opsional (membutuhkan `ADMIN_EMAIL` & `ADMIN_PASSWORD`). |
+| `ADMIN_EMAIL` | Opsional | — | Alamat email untuk akun administrator yang dikonfigurasi melalui environment. |
+| `ADMIN_PASSWORD` | Opsional | — | Password (6–128 karakter) untuk akun administrator yang dikonfigurasi melalui environment. |
+| `APP_URL` | Opsional | `RAILWAY_PUBLIC_DOMAIN` atau `http://localhost:3000` | URL asal publik yang digunakan untuk metadata, `robots.txt`, dan `sitemap.xml`. |
+| `PORT` | Opsional | `3000` | Port HTTP yang diikat oleh server Next.js. |
+| `NODE_ENV` | Produksi | `production` | Mode runtime (`production` untuk deployment). |
 
 ---
 
-## Tech Stack
+## Teknologi yang Digunakan
 
 - **Framework:** Next.js 15 (App Router), React 19, TypeScript
 - **Styling & UI:** Tailwind CSS v4, Lucide Icons, Motion, Recharts, SweetAlert2
-- **Code Editor:** CodeMirror 6 (`@codemirror/view`, `@codemirror/state`, `@codemirror/language`, `@codemirror/language-data`, `@codemirror/commands`, `@codemirror/search`, `@codemirror/theme-one-dark`)
-- **Console Highlighting:** jQuery (`jquery`) dedicated strictly to colored ANSI & semantic terminal output spans
-- **Real-Time Streaming:** Native Node.js `ReadableStream` Server-Sent Events (SSE)
-- **Persistence:** Atomic JSON datastore (`data/panel-db.json`) with write lock and auto-generated `.session-secret`
-- **Process Supervision:** Native `node:child_process` tree manager with Linux `/proc` & cgroup sampling, network rate counters, and `stdin` hooks
+- **Editor Kode:** CodeMirror 6 (`@codemirror/view`, `@codemirror/state`, `@codemirror/language`, `@codemirror/language-data`, `@codemirror/commands`, `@codemirror/search`, `@codemirror/theme-one-dark`)
+- **Highlight Konsol:** jQuery (`jquery`) yang didedikasikan secara ketat untuk span teks warna output ANSI & semantik terminal
+- **Streaming Real-Time:** Server-Sent Events (SSE) `ReadableStream` bawaan Node.js
+- **Persistensi:** Datastore JSON atomik (`data/panel-db.json`) dengan write lock dan `.session-secret` otomatis
+- **Supervisi Proses:** Manajer pohon `node:child_process` bawaan dengan sampling Linux `/proc` & cgroup, penghitung laju jaringan, dan hook `stdin`
 
 ---
 
-## Project Structure
+## Struktur Proyek
 
 ```text
 ├── app/
-│   ├── (panel)/                     # Protected dashboard, host, admin, and server workspace routes
-│   ├── api/                         # Auth, admin, host telemetry, SSE stream, power, files, and console APIs
-│   ├── login/ & register/           # Authentication routes
-│   └── globals.css                  # Tailwind CSS v4 setup & theme utilities
+│   ├── (panel)/                     # Rute dasbor, host, admin, dan workspace server yang dilindungi
+│   ├── api/                         # API autentikasi, admin, telemetri host, stream SSE, power, file, dan konsol
+│   ├── login/ & register/           # Rute autentikasi
+│   └── globals.css                  # Pengaturan Tailwind CSS v4 & utilitas tema
 ├── components/
-│   ├── code-editor.tsx              # CodeMirror 6 multi-language syntax-highlighted code editor
-│   ├── console-jquery-highlight.tsx # jQuery-based terminal output text colorizer
-│   ├── server-console.tsx           # Real-time SSE console, power controls & Recharts telemetry
-│   ├── server-files.tsx             # File manager (CRUD, upload, bulk actions, ZIP, CodeEditor)
-│   ├── server-settings.tsx          # Auto-saving startup, metadata, port & deletion settings
-│   ├── host-resources.tsx           # Host hardware, quota & runtime overview
-│   ├── admin-panel.tsx              # Admin user & server management views
-│   └── ...                          # Shell, dashboard, auth form, modals & skeletons
-├── docs/screenshots/                # Web UI screenshots used in documentation
+│   ├── code-editor.tsx              # Editor kode CodeMirror 6 multi-bahasa ber-highlight syntax
+│   ├── console-jquery-highlight.tsx # Pewarna teks output terminal berbasis jQuery
+│   ├── server-console.tsx           # Konsol SSE real-time, kontrol power & telemetri Recharts
+│   ├── server-files.tsx             # Manajer file (CRUD, upload, aksi massal, ZIP, CodeEditor)
+│   ├── server-settings.tsx          # Pengaturan startup, metadata, port & hapus simpan-otomatis
+│   ├── host-resources.tsx           # Ikhtisar perangkat keras host, kuota & runtime
+│   ├── admin-panel.tsx              # Tampilan manajemen pengguna & server admin
+│   └── ...                          # Shell, dasbor, formulir auth, modal & skeleton
+├── docs/screenshots/                # Tangkapan layar UI web yang digunakan dalam dokumentasi
 ├── lib/
-│   ├── auth.ts                      # scrypt password hashing & HMAC-SHA256 session tokens
-│   ├── code-language.ts             # Filename-to-CodeMirror language resolver (100+ languages)
-│   ├── console-highlight.ts         # ANSI SGR/256/RGB & semantic log tokenizer
-│   ├── console-state.ts             # Power button & stdin input availability helpers
-│   ├── console-stream.ts            # Partial-line & carriage-return SSE stream parser
-│   ├── db.ts                        # Atomic JSON database, optional env admin sync & workspaces
-│   ├── files.ts                     # Sandboxed file CRUD, ZIP archive/extract & .env handling
-│   ├── host-stats.ts                # Host & cgroup CPU/RAM/Swap/Disk telemetry helpers
-│   ├── network-stats.ts             # Per-server inbound/outbound network rate counters
-│   ├── processes.ts                 # Child process lifecycle, metrics & stdin hooks
-│   ├── resource-limits.ts           # Host-bounded memory & CPU quota option generators
-│   └── security.ts                  # Path traversal guards & runtime command validators
-├── Dockerfile                       # Production image for Docker & Railway deployments
-├── install.sh                       # Automated Ubuntu/Debian systemd installer
-└── .env                             # Environment variable configuration
+│   ├── auth.ts                      # Hashing password scrypt & token sesi HMAC-SHA256
+│   ├── code-language.ts             # Resolver bahasa CodeMirror dari nama file (100+ bahasa)
+│   ├── console-highlight.ts         # Tokenizer log ANSI SGR/256/RGB & semantik
+│   ├── console-state.ts             # Helper ketersediaan tombol power & input stdin
+│   ├── console-stream.ts            # Parser stream SSE partial-line & carriage-return
+│   ├── db.ts                        # Database JSON atomik, sinkronisasi admin env opsional & workspace
+│   ├── files.ts                     # CRUD file terisolasi, arsip/ekstrak ZIP & penanganan .env
+│   ├── host-stats.ts                # Helper telemetri CPU/RAM/Swap/Disk host & cgroup
+│   ├── network-stats.ts             # Penghitung laju jaringan masuk/keluar per server
+│   ├── processes.ts                 # Siklus hidup proses anak, metrik & hook stdin
+│   ├── resource-limits.ts           # Generator opsi kuota memori & CPU yang dibatasi host
+│   └── security.ts                  # Pelindung path traversal & validator perintah runtime
+├── Dockerfile                       # Image produksi untuk deployment Docker & Railway
+├── install.sh                       # Pemasang systemd Ubuntu/Debian otomatis
+└── .env                             # Konfigurasi variabel lingkungan
 ```
 
 ---
 
-## License
+## Lisensi
 
-This project is open-source software. Review and customize access policies before exposing your host to untrusted users.
+Proyek ini adalah perangkat lunak open-source. Tinjau dan sesuaikan kebijakan akses sebelum mengekspos host Anda ke pengguna yang tidak dipercaya.

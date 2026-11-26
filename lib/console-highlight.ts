@@ -21,19 +21,19 @@ interface AnsiStyle {
 
 const ANSI_FG_MAP: Record<number, string> = {
   30: 'text-zinc-500',
-  31: 'text-red-400',
+  31: 'text-red-500',
   32: 'text-emerald-400',
-  33: 'text-amber-400',
-  34: 'text-sky-400',
-  35: 'text-violet-400',
+  33: 'text-yellow-400',
+  34: 'text-blue-500',
+  35: 'text-fuchsia-400',
   36: 'text-cyan-400',
   37: 'text-zinc-200',
   90: 'text-zinc-500',
-  91: 'text-red-300',
-  92: 'text-emerald-300',
-  93: 'text-amber-300',
-  94: 'text-sky-300',
-  95: 'text-violet-300',
+  91: 'text-red-400',
+  92: 'text-green-400',
+  93: 'text-yellow-300',
+  94: 'text-blue-400',
+  95: 'text-fuchsia-300',
   96: 'text-cyan-300',
   97: 'text-white',
 };
@@ -42,36 +42,36 @@ const ANSI_BG_MAP: Record<number, string> = {
   40: 'bg-zinc-900',
   41: 'bg-red-500/25',
   42: 'bg-emerald-500/25',
-  43: 'bg-amber-500/25',
-  44: 'bg-sky-500/25',
-  45: 'bg-violet-500/25',
+  43: 'bg-yellow-500/25',
+  44: 'bg-blue-500/25',
+  45: 'bg-fuchsia-500/25',
   46: 'bg-cyan-500/25',
   47: 'bg-zinc-200/20',
   100: 'bg-zinc-700/50',
   101: 'bg-red-500/35',
   102: 'bg-emerald-500/35',
-  103: 'bg-amber-500/35',
-  104: 'bg-sky-500/35',
-  105: 'bg-violet-500/35',
+  103: 'bg-yellow-500/35',
+  104: 'bg-blue-500/35',
+  105: 'bg-fuchsia-500/35',
   106: 'bg-cyan-500/35',
   107: 'bg-white/25',
 };
 
 const XTERM_16_HEX = [
   '#52525b',
-  '#f87171',
-  '#34d399',
-  '#fbbf24',
-  '#38bdf8',
-  '#a78bfa',
-  '#22d3ee',
+  '#ef4444',
+  '#22c55e',
+  '#eab308',
+  '#3b82f6',
+  '#d946ef',
+  '#06b6d4',
   '#e4e4e7',
   '#71717a',
-  '#fca5a5',
-  '#6ee7b7',
-  '#fcd34d',
-  '#7dd3fc',
-  '#c4b5fd',
+  '#f87171',
+  '#4ade80',
+  '#fde047',
+  '#60a5fa',
+  '#f0abfc',
   '#67e8f9',
   '#ffffff',
 ];
@@ -110,12 +110,20 @@ function normalizeCarriageReturns(raw: string): string {
   return buffer;
 }
 
-function buildAnsiClassName(style: AnsiStyle): string {
+function buildAnsiClassName(style: AnsiStyle, fallbackClass = ''): string {
   const classes: string[] = [];
   if (style.inverse) {
     classes.push('bg-zinc-200 text-zinc-950 px-0.5 rounded-[2px]');
   } else {
-    if (style.fgClass && !style.fgColor) classes.push(style.fgClass);
+    if (style.fgClass && !style.fgColor) {
+      classes.push(style.fgClass);
+    } else if (!style.fgColor) {
+      if (style.bold) {
+        classes.push('text-zinc-100');
+      } else if (fallbackClass) {
+        classes.push(fallbackClass);
+      }
+    }
     if (style.bgClass && !style.bgColor) classes.push(style.bgClass);
   }
   if (style.bold) classes.push('font-semibold');
@@ -134,7 +142,10 @@ function buildAnsiInlineStyle(style: AnsiStyle): CSSProperties | undefined {
   return Object.keys(css).length > 0 ? css : undefined;
 }
 
-function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle }> {
+function splitAnsiSegments(raw: string): {
+  segments: Array<{ text: string; style: AnsiStyle }>;
+  hasAnsi: boolean;
+} {
   const normalized = normalizeCarriageReturns(raw);
   const cleaned = normalized
     .replace(NON_SGR_ESCAPE_RE, '')
@@ -156,9 +167,11 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
+  let hasAnsi = false;
   SGR_RE.lastIndex = 0;
 
   while ((match = SGR_RE.exec(cleaned)) !== null) {
+    hasAnsi = true;
     if (match.index > lastIndex) {
       segments.push({
         text: cleaned.slice(lastIndex, match.index),
@@ -263,43 +276,65 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
     });
   }
 
-  return segments;
+  return { segments, hasAnsi };
+}
+
+const URL_RE = /(https?:\/\/[^\s"'<>)\]]+|wss?:\/\/[^\s"'<>)\]]+)/g;
+
+function linkifyAnsiSegment(
+  text: string,
+  baseClass: string,
+  inlineStyle?: CSSProperties
+): HighlightToken[] {
+  URL_RE.lastIndex = 0;
+  const tokens: HighlightToken[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({
+        text: text.slice(lastIndex, match.index),
+        className: baseClass,
+        ...(inlineStyle ? { style: inlineStyle } : {}),
+      });
+    }
+    tokens.push({
+      text: match[0],
+      className: 'text-cyan-400 underline decoration-cyan-400/35 underline-offset-2',
+      ...(inlineStyle ? { style: inlineStyle } : {}),
+    });
+    lastIndex = URL_RE.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    tokens.push({
+      text: text.slice(lastIndex),
+      className: baseClass,
+      ...(inlineStyle ? { style: inlineStyle } : {}),
+    });
+  }
+
+  return tokens;
 }
 
 const SEMANTIC_TOKEN_RE = new RegExp(
   [
-
+    /((?:^|\s)npm\s+(?:error|ERR!)(?:\s+(?:code|syscall|errno|path|dest|status|\d{3}))?)/.source,
+    /((?:^|\s)npm\s+(?:warn|WARN)(?:\s+[a-zA-Z0-9_.-]+)?)/.source,
+    /((?:^|\s)npm\s+notice(?:\s+[a-zA-Z0-9_.-]+)?)/.source,
+    /((?:^|\s)npm\s+http\s+(?:fetch|cache))/.source,
+    /((?:^|\s)npm\s+(?:info|verb|silly))/.source,
     /(https?:\/\/[^\s"'<>)\]]+|wss?:\/\/[^\s"'<>)\]]+)/.source,
-
     /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\])/.source,
-
     /(\[?(?:FATAL|CRITICAL|ERROR|ERR!|FAILED)\]?|\b(?:Traceback|AssertionError|TypeError|ReferenceError|SyntaxError|ValueError|KeyError|RuntimeError|ImportError|ModuleNotFoundError|PermissionError|OSError|ConnectionError|TimeoutError|ENOENT|EACCES|EADDRINUSE|ECONNREFUSED|ETIMEDOUT|ERR_MODULE_NOT_FOUND|UnhandledPromiseRejection)\b)/.source,
-
-    /(\[?(?:WARN|WARNING)\]?|\bnpm warn\b|\bDeprecationWarning\b)/.source,
-
-    /(\[(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED|OK|PASS|PASSED)\]|(?<=^|\s)(?:READY|LISTENING|CONNECTED|ONLINE|PASSED|DONE)(?=\s|:|$))/.source,
-
-    /(\[(?:INFO|NOTICE)\]|\b(?:INFO|NOTICE):|\bnpm notice\b)/.source,
-
+    /(\[?(?:WARN|WARNING)\]?|\bDeprecationWarning\b)/.source,
+    /(\[(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED|OK|PASS|PASSED)\]|\bfound 0 vulnerabilities\b)/.source,
+    /(\[(?:INFO|NOTICE)\]|\b(?:INFO|NOTICE):|\bcontainer@cmnty~)/.source,
     /(\[(?:DEBUG|TRACE)\]|\b(?:DEBUG|TRACE):)/.source,
-
-    /(\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/[^\s]*\s+[1-5]\d{2}\b)/.source,
-
+    /(\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/[^\s"]*(?:\s+HTTP\/[0-9.]+)?"?\s+[1-5]\d{2}\b)/.source,
     /([a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|py|json|ya?ml|env|sh|sql):\d+(?::\d+)?)/.source,
-
-    /(\b(?:localhost|(?:\d{1,3}\.){3}\d{1,3})(?::\d{2,5})?\b)/.source,
-
-    /(\b[A-Z_][A-Z0-9_]{1,}=(?:[^\s"']+|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))/.source,
-
-    /("(?:[^"\\]|\\.)*"(?=\s*:))/.source,
-
-    /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/.source,
-
-    /((?<=^|\s)--?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\s"']+)?)/.source,
-
-    /(\b(?:true|false|null|undefined|None|True|False|NaN|Infinity)\b)/.source,
-
-    /(\b\d+(?:\.\d+)?(?:ms|µs|us|ns|s|m|h|B|KB|MB|GB|KiB|MiB|GiB|%|px)?\b)/.source,
+    /(\b(?:localhost|(?:\d{1,3}\.){3}\d{1,3}):\d{2,5}\b)/.source,
   ].join('|'),
   'g'
 );
@@ -311,76 +346,120 @@ function classifySemanticToken(
   const full = match[0];
 
   if (match[1]) {
+    const parts = /^(\s*)(npm)(\s+)(error|ERR!)(?:(\s+)(\S+))?$/.exec(full);
+    if (parts) {
+      const out: HighlightToken[] = [];
+      if (parts[1]) out.push({ text: parts[1], className: defaultClass });
+      out.push({ text: parts[2], className: 'text-zinc-100 font-semibold' });
+      out.push({ text: parts[3], className: defaultClass });
+      out.push({ text: parts[4], className: 'text-red-500 font-semibold' });
+      if (parts[5] && parts[6]) {
+        out.push({ text: parts[5], className: defaultClass });
+        out.push({ text: parts[6], className: 'text-blue-400' });
+      }
+      return out;
+    }
+  }
+
+  if (match[2]) {
+    const parts = /^(\s*)(npm)(\s+)(warn|WARN)(?:(\s+)(\S+))?$/.exec(full);
+    if (parts) {
+      const out: HighlightToken[] = [];
+      if (parts[1]) out.push({ text: parts[1], className: defaultClass });
+      out.push({ text: parts[2], className: 'text-zinc-100 font-semibold' });
+      out.push({ text: parts[3], className: defaultClass });
+      out.push({ text: parts[4], className: 'text-yellow-400 font-semibold' });
+      if (parts[5] && parts[6]) {
+        out.push({ text: parts[5], className: defaultClass });
+        out.push({ text: parts[6], className: 'text-fuchsia-400' });
+      }
+      return out;
+    }
+  }
+
+  if (match[3]) {
+    const parts = /^(\s*)(npm)(\s+)(notice)(?:(\s+)(\S+))?$/.exec(full);
+    if (parts) {
+      const out: HighlightToken[] = [];
+      if (parts[1]) out.push({ text: parts[1], className: defaultClass });
+      out.push({ text: parts[2], className: 'text-zinc-100 font-semibold' });
+      out.push({ text: parts[3], className: defaultClass });
+      out.push({ text: parts[4], className: 'text-fuchsia-400 font-semibold' });
+      if (parts[5] && parts[6]) {
+        out.push({ text: parts[5], className: defaultClass });
+        out.push({ text: parts[6], className: 'text-cyan-400' });
+      }
+      return out;
+    }
+  }
+
+  if (match[4]) {
+    const parts = /^(\s*)(npm)(\s+)(http)(\s+)(fetch|cache)$/.exec(full);
+    if (parts) {
+      const out: HighlightToken[] = [];
+      if (parts[1]) out.push({ text: parts[1], className: defaultClass });
+      out.push({ text: parts[2], className: 'text-zinc-100 font-semibold' });
+      out.push({ text: parts[3], className: defaultClass });
+      out.push({ text: parts[4], className: 'text-emerald-400' });
+      out.push({ text: parts[5], className: defaultClass });
+      out.push({ text: parts[6], className: 'text-blue-400' });
+      return out;
+    }
+  }
+
+  if (match[5]) {
+    const parts = /^(\s*)(npm)(\s+)(info|verb|silly)$/.exec(full);
+    if (parts) {
+      const out: HighlightToken[] = [];
+      if (parts[1]) out.push({ text: parts[1], className: defaultClass });
+      out.push({ text: parts[2], className: 'text-zinc-100 font-semibold' });
+      out.push({ text: parts[3], className: defaultClass });
+      out.push({ text: parts[4], className: 'text-cyan-400' });
+      return out;
+    }
+  }
+
+  if (match[6]) {
     return [{ text: full, className: 'text-cyan-400 underline decoration-cyan-400/35 underline-offset-2' }];
   }
-  if (match[2]) return [{ text: full, className: 'text-zinc-500' }];
-  if (match[3]) return [{ text: full, className: 'text-red-400 font-semibold' }];
-  if (match[4]) return [{ text: full, className: 'text-amber-400 font-semibold' }];
-  if (match[5]) return [{ text: full, className: 'text-emerald-400 font-semibold' }];
-  if (match[6]) return [{ text: full, className: 'text-sky-400 font-medium' }];
-  if (match[7]) return [{ text: full, className: 'text-violet-400 font-medium' }];
-  if (match[8]) {
-    const parts = /^(\S+)(\s+)(\/[^\s]*)(\s+)([1-5]\d{2})$/.exec(full);
+  if (match[7]) return [{ text: full, className: 'text-zinc-500' }];
+  if (match[8]) return [{ text: full, className: 'text-red-500 font-semibold' }];
+  if (match[9]) return [{ text: full, className: 'text-yellow-400 font-semibold' }];
+  if (match[10]) return [{ text: full, className: 'text-emerald-400 font-semibold' }];
+  if (match[11]) return [{ text: full, className: 'text-blue-400 font-medium' }];
+  if (match[12]) return [{ text: full, className: 'text-fuchsia-400 font-medium' }];
+
+  if (match[13]) {
+    const parts = /^(\S+)(\s+)(\/[^\s"]*(?:\s+HTTP\/[0-9.]+)?"?)(\s+)([1-5]\d{2})$/.exec(full);
     if (parts) {
       const code = Number(parts[5]);
       const statusCls =
         code < 300
           ? 'text-emerald-400 font-semibold'
           : code < 400
-          ? 'text-amber-400 font-semibold'
-          : 'text-red-400 font-semibold';
+          ? 'text-yellow-400 font-semibold'
+          : 'text-red-500 font-semibold';
       return [
-        { text: parts[1], className: 'text-sky-300 font-semibold' },
+        { text: parts[1], className: 'text-cyan-300 font-semibold' },
         { text: parts[2], className: defaultClass },
-        { text: parts[3], className: 'text-zinc-300' },
+        { text: parts[3], className: 'text-zinc-200' },
         { text: parts[4], className: defaultClass },
         { text: parts[5], className: statusCls },
       ];
     }
   }
-  if (match[9]) {
+
+  if (match[14]) {
     return [
       {
         text: full,
-        className: 'text-amber-300/90 underline decoration-amber-300/30 underline-offset-2',
+        className: 'text-cyan-300 underline decoration-cyan-300/30 underline-offset-2',
       },
     ];
   }
-  if (match[10]) {
-    return [{ text: full, className: 'text-cyan-300' }];
-  }
-  if (match[11]) {
-    const eqIdx = full.indexOf('=');
-    const key = full.slice(0, eqIdx);
-    const val = full.slice(eqIdx + 1);
-    return [
-      { text: key, className: 'text-violet-400 font-medium' },
-      { text: '=', className: 'text-zinc-500' },
-      { text: val, className: 'text-emerald-300' },
-    ];
-  }
-  if (match[12]) {
-    return [{ text: full, className: 'text-sky-300' }];
-  }
-  if (match[13]) {
-    return [{ text: full, className: 'text-emerald-300/90' }];
-  }
-  if (match[14]) {
-    const eqIdx = full.indexOf('=');
-    if (eqIdx !== -1) {
-      return [
-        { text: full.slice(0, eqIdx), className: 'text-sky-300' },
-        { text: '=', className: 'text-zinc-500' },
-        { text: full.slice(eqIdx + 1), className: 'text-amber-300' },
-      ];
-    }
-    return [{ text: full, className: 'text-sky-300' }];
-  }
+
   if (match[15]) {
-    return [{ text: full, className: 'text-violet-400 font-medium' }];
-  }
-  if (match[16]) {
-    return [{ text: full, className: 'text-amber-300' }];
+    return [{ text: full, className: 'text-cyan-300' }];
   }
 
   return [{ text: full, className: defaultClass }];
@@ -388,9 +467,7 @@ function classifySemanticToken(
 
 function tokenizePlainText(
   text: string,
-  defaultClass: string,
-  extraClasses: string,
-  inlineStyle?: CSSProperties
+  defaultClass: string
 ): HighlightToken[] {
   const tokens: HighlightToken[] = [];
   SEMANTIC_TOKEN_RE.lastIndex = 0;
@@ -402,8 +479,7 @@ function tokenizePlainText(
     if (match.index > lastIndex) {
       tokens.push({
         text: text.slice(lastIndex, match.index),
-        className: [defaultClass, extraClasses].filter(Boolean).join(' '),
-        ...(inlineStyle ? { style: inlineStyle } : {}),
+        className: defaultClass,
       });
     }
 
@@ -411,8 +487,7 @@ function tokenizePlainText(
     for (const item of classified) {
       tokens.push({
         text: item.text,
-        className: [item.className, extraClasses].filter(Boolean).join(' '),
-        ...(inlineStyle ? { style: inlineStyle } : {}),
+        className: item.className,
       });
     }
 
@@ -422,8 +497,7 @@ function tokenizePlainText(
   if (lastIndex < text.length) {
     tokens.push({
       text: text.slice(lastIndex),
-      className: [defaultClass, extraClasses].filter(Boolean).join(' '),
-      ...(inlineStyle ? { style: inlineStyle } : {}),
+      className: defaultClass,
     });
   }
 
@@ -436,12 +510,15 @@ export function tokenizeConsoleLine(
 ): HighlightToken[] {
   if (!text) return [];
 
-  const segments = splitAnsiSegments(text);
-  const result: HighlightToken[] = [];
+  const { segments, hasAnsi } = splitAnsiSegments(text);
+  if (!hasAnsi) {
+    return tokenizePlainText(segments.map((s) => s.text).join(''), defaultClass);
+  }
 
+  const result: HighlightToken[] = [];
   for (const seg of segments) {
     if (!seg.text) continue;
-    const ansiClass = buildAnsiClassName(seg.style);
+    const ansiClass = buildAnsiClassName(seg.style, defaultClass);
     const ansiInline = buildAnsiInlineStyle(seg.style);
 
     if (seg.style.fgClass || seg.style.fgColor || seg.style.inverse) {
@@ -451,8 +528,7 @@ export function tokenizeConsoleLine(
         ...(ansiInline ? { style: ansiInline } : {}),
       });
     } else {
-      const semantic = tokenizePlainText(seg.text, defaultClass, ansiClass, ansiInline);
-      result.push(...semantic);
+      result.push(...linkifyAnsiSegment(seg.text, ansiClass, ansiInline));
     }
   }
 
