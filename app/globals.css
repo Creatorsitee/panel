@@ -49,7 +49,6 @@
   );
 }
 
-/* SweetAlert2 Theme Harmonization */
 .cmnty-swal-popup {
   border-radius: 0.65rem !important;
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
@@ -112,7 +111,6 @@
     color-scheme: light;
   }
 
-  /* Subtle custom scrollbar for terminal and file tree */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;

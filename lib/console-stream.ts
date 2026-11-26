@@ -73,7 +73,6 @@ export function processStreamChunk(options: {
 
   let normalized = rawText.replace(/\r\n/g, '\n');
 
-  // If previous chunk ended with '\r' and this chunk begins with '\n', treat '\r\n' as newline.
   if (partial.overwritePending && normalized.startsWith('\n')) {
     partial.overwritePending = false;
   }
@@ -113,7 +112,7 @@ export function processStreamChunk(options: {
     let segment = normalized.slice(cursor, segmentEnd);
 
     if (segment.length > 0) {
-      // Handle explicit ANSI Erase Line sequences (\x1b[2K or \x1b[K) if present
+
       const eraseAllIdx = segment.lastIndexOf('\x1b[2K');
       if (eraseAllIdx !== -1) {
         partial.buffer = '';

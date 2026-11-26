@@ -164,7 +164,6 @@ export default function ServerSettingsTab({
       ? 'Port harus berupa angka antara 1024 hingga 65535.'
       : null;
 
-  // Silent auto-save only when values are valid and actually differ from last saved state
   useEffect(() => {
     const saved = lastSavedRef.current;
     const trimmedName = name.trim();
@@ -313,9 +312,9 @@ export default function ServerSettingsTab({
             </h3>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label htmlFor="srv-name" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="space-y-1.5 min-w-0">
+              <label htmlFor="srv-name" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
                 Nama Server
               </label>
               <input
@@ -331,8 +330,8 @@ export default function ServerSettingsTab({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="srv-desc" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            <div className="space-y-1.5 min-w-0">
+              <label htmlFor="srv-desc" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
                 Catatan
               </label>
               <input
@@ -348,7 +347,7 @@ export default function ServerSettingsTab({
               />
             </div>
 
-            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="col-span-2 grid grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 min-w-0">
                 <label htmlFor="srv-mem" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
                   Alokasi Memori
@@ -386,7 +385,7 @@ export default function ServerSettingsTab({
               </div>
             </div>
 
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1.5 col-span-2">
               <label htmlFor="srv-port-edit" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                 Port Internal
               </label>
@@ -415,7 +414,6 @@ export default function ServerSettingsTab({
         </div>
       </div>
 
-      {/* Danger Zone */}
       <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 sm:p-5 space-y-4">
         <div className="flex items-center gap-2 pb-3 border-b border-red-500/20">
           <ShieldAlert className="w-4 h-4 text-red-500" />

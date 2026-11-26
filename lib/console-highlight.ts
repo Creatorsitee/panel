@@ -91,7 +91,6 @@ function xterm256ToHex(index: number): string {
   return `rgb(${gray}, ${gray}, ${gray})`;
 }
 
-// Strips non-SGR CSI/OSC escape sequences (cursor moves, line clear, window title, etc.)
 const NON_SGR_ESCAPE_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]/g;
 const TRAILING_INCOMPLETE_ESCAPE_RE = /\x1b(?:\[[0-9;:?]*|\][^\x07\x1b]*)?$/;
 const SGR_RE = /\x1b\[([0-9;:]*)m/g;
@@ -269,37 +268,37 @@ function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle 
 
 const SEMANTIC_TOKEN_RE = new RegExp(
   [
-    // 1: URLs
+
     /(https?:\/\/[^\s"'<>)\]]+|wss?:\/\/[^\s"'<>)\]]+)/.source,
-    // 2: ISO or bracketed timestamps
+
     /(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\])/.source,
-    // 3: Critical / Error keywords & runtime exceptions
+
     /(\[?(?:FATAL|CRITICAL|ERROR|ERR!|FAILED)\]?|\b(?:Traceback|AssertionError|TypeError|ReferenceError|SyntaxError|ValueError|KeyError|RuntimeError|ImportError|ModuleNotFoundError|PermissionError|OSError|ConnectionError|TimeoutError|ENOENT|EACCES|EADDRINUSE|ECONNREFUSED|ETIMEDOUT|ERR_MODULE_NOT_FOUND|UnhandledPromiseRejection)\b)/.source,
-    // 4: Warning keywords
+
     /(\[?(?:WARN|WARNING)\]?|\bnpm warn\b|\bDeprecationWarning\b)/.source,
-    // 5: Success / Ready keywords
+
     /(\[(?:SUCCESS|READY|LISTENING|STARTED|CONNECTED|OK|PASS|PASSED)\]|(?<=^|\s)(?:READY|LISTENING|CONNECTED|ONLINE|PASSED|DONE)(?=\s|:|$))/.source,
-    // 6: Info / Notice badges
+
     /(\[(?:INFO|NOTICE)\]|\b(?:INFO|NOTICE):|\bnpm notice\b)/.source,
-    // 7: Debug / Trace badges
+
     /(\[(?:DEBUG|TRACE)\]|\b(?:DEBUG|TRACE):)/.source,
-    // 8: Structured HTTP request + status (e.g. "GET /api/health 200")
+
     /(\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/[^\s]*\s+[1-5]\d{2}\b)/.source,
-    // 9: File path with line(:col)
+
     /([a-zA-Z0-9_./-]+\.(?:[cm]?[jt]sx?|py|json|ya?ml|env|sh|sql):\d+(?::\d+)?)/.source,
-    // 10: Host/IP with optional port (e.g. localhost:3000, 127.0.0.1:4001, 0.0.0.0:8080)
+
     /(\b(?:localhost|(?:\d{1,3}\.){3}\d{1,3})(?::\d{2,5})?\b)/.source,
-    // 11: ENV_KEY=value assignments
+
     /(\b[A-Z_][A-Z0-9_]{1,}=(?:[^\s"']+|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))/.source,
-    // 12: JSON object keys ("key":)
+
     /("(?:[^"\\]|\\.)*"(?=\s*:))/.source,
-    // 13: Quoted strings
+
     /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/.source,
-    // 14: CLI flags (--reload, --port=4001, -u)
+
     /((?<=^|\s)--?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\s"']+)?)/.source,
-    // 15: Booleans & null/None/undefined
+
     /(\b(?:true|false|null|undefined|None|True|False|NaN|Infinity)\b)/.source,
-    // 16: Numbers & duration/size units
+
     /(\b\d+(?:\.\d+)?(?:ms|µs|us|ns|s|m|h|B|KB|MB|GB|KiB|MiB|GiB|%|px)?\b)/.source,
   ].join('|'),
   'g'

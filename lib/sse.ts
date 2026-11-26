@@ -146,7 +146,7 @@ export function connectSseStream(options: ConnectSseOptions): () => void {
             const payload = JSON.parse(frame.data);
             onEvent(frame.event, payload);
           } catch {
-            // ignore malformed JSON payload
+
           }
         }
       }

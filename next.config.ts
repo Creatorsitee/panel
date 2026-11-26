@@ -4,6 +4,7 @@ import path from 'node:path';
 
 export default function createNextConfig(phase: string): NextConfig {
   return {
+    output: 'standalone',
     distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
     reactStrictMode: true,
     eslint: {
@@ -12,20 +13,20 @@ export default function createNextConfig(phase: string): NextConfig {
     typescript: {
       ignoreBuildErrors: false,
     },
-    // Allow access to remote image placeholder.
+
     images: {
       remotePatterns: [
         {
           protocol: 'https',
           hostname: 'picsum.photos',
           port: '',
-          pathname: '/**', // This allows any path under the hostname
+          pathname: '/**',
         },
       ],
     },
     transpilePackages: ['motion'],
     webpack: (config, { dev }) => {
-      // Disable file watching when DISABLE_HMR=true to prevent flickering during edits.
+
       if (dev && process.env.DISABLE_HMR === 'true') {
         config.watchOptions = {
           ignored: /.*/,

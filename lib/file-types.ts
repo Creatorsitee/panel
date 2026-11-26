@@ -1,5 +1,5 @@
 export const NON_EDITABLE_BINARY_EXTENSIONS = new Set([
-  // Archives & packages
+
   '.zip',
   '.tar',
   '.gz',
@@ -35,7 +35,7 @@ export const NON_EDITABLE_BINARY_EXTENSIONS = new Set([
   '.whl',
   '.egg',
   '.nupkg',
-  // Images & photos (note: .svg remains editable as XML text)
+
   '.png',
   '.jpg',
   '.jpeg',
@@ -61,7 +61,7 @@ export const NON_EDITABLE_BINARY_EXTENSIONS = new Set([
   '.xcf',
   '.ai',
   '.eps',
-  // Audio & video
+
   '.mp3',
   '.wav',
   '.ogg',
@@ -84,9 +84,9 @@ export const NON_EDITABLE_BINARY_EXTENSIONS = new Set([
   '.webm',
   '.3gp',
   '.ts',
-  // Wait: .ts is TypeScript! Remove .ts from video! Keep .mts / .m2ts only if needed.
+
   '.m2ts',
-  // Executables, bytecode & shared libraries
+
   '.exe',
   '.msi',
   '.dll',
@@ -107,13 +107,13 @@ export const NON_EDITABLE_BINARY_EXTENSIONS = new Set([
   '.out',
   '.appimage',
   '.node',
-  // Fonts
+
   '.ttf',
   '.otf',
   '.woff',
   '.woff2',
   '.eot',
-  // Documents, Office & Databases/ML weights
+
   '.pdf',
   '.doc',
   '.docx',
@@ -145,7 +145,6 @@ export const NON_EDITABLE_BINARY_EXTENSIONS = new Set([
   '.hdf5',
 ]);
 
-// Ensure .ts (TypeScript) is never blocked
 NON_EDITABLE_BINARY_EXTENSIONS.delete('.ts');
 
 const COMPOUND_ARCHIVE_SUFFIXES = [
@@ -169,7 +168,7 @@ export function isEditableTextFile(filename: string): boolean {
 
   const idx = baseName.lastIndexOf('.');
   if (idx <= 0) {
-    // Dotfiles like .env, .gitignore, or extensionless files like Dockerfile / Procfile are editable
+
     if (idx === 0) {
       return !NON_EDITABLE_BINARY_EXTENSIONS.has(baseName);
     }

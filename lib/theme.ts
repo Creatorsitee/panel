@@ -23,7 +23,7 @@ function getThemeSnapshot(): ThemeMode {
       return saved;
     }
   } catch {
-    // ignore storage errors
+
   }
   return 'dark';
 }
@@ -37,7 +37,7 @@ export function saveThemeMode(nextMode: ThemeMode): void {
     window.localStorage.setItem(THEME_STORAGE_KEY, nextMode);
     window.dispatchEvent(new Event(THEME_EVENT));
   } catch {
-    // ignore storage errors
+
   }
 }
 

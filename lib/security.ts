@@ -49,9 +49,6 @@ export interface ParsedCommand {
   npmScriptName: string | null;
 }
 
-/**
- * Resolves a relative user path inside a base directory and rejects path traversal.
- */
 export function resolveSafePath(baseDir: string, relativePath: string): string {
   const normalizedBase = path.resolve(baseDir);
   const cleaned = (relativePath || '').replace(/^\/+/, '');
@@ -75,10 +72,6 @@ function assertRelativeWorkspaceArg(arg: string): void {
   }
 }
 
-/**
- * Tokenizes a startup command cleanly without invoking a shell, enforces runtime matching,
- * blocks inline eval/shell escape flags, and prevents path traversal outside the server directory.
- */
 export function parseSafeStartupCommand(command: string, expectedRuntime?: ServerRuntime): ParsedCommand {
   const trimmed = (command || '').trim();
   if (!trimmed) {
@@ -246,7 +239,6 @@ export function parseSafeStartupCommand(command: string, expectedRuntime?: Serve
     };
   }
 
-  // Remaining Node binaries: node, tsx, ts-node, nodemon
   const positionalNodeArgs = args.filter((a) => !a.startsWith('-'));
   const scriptArg =
     executable === 'tsx' && positionalNodeArgs[0] === 'watch'
@@ -259,16 +251,10 @@ export function parseSafeStartupCommand(command: string, expectedRuntime?: Serve
   return { executable, args, scriptArg, pythonModule: null, npmScriptName: null };
 }
 
-/**
- * Validates environment variable keys.
- */
 export function isValidEnvKey(key: string): boolean {
   return /^[A-Z_][A-Z0-9_]*$/.test(key);
 }
 
-/**
- * Parses a .env file from disk safely, skipping comments and reserved process variables.
- */
 export function parseDotEnvContent(content: string): Record<string, string> {
   const result: Record<string, string> = {};
   const lines = (content || '').replace(/\r\n/g, '\n').split('\n');
@@ -294,9 +280,6 @@ export function parseDotEnvContent(content: string): Record<string, string> {
   return result;
 }
 
-/**
- * Allocates the next available TCP port for a server.
- */
 export function allocateNextPort(usedPorts: number[], startPort = 4001, maxPort = 4999): number {
   const used = new Set(usedPorts);
   for (let port = startPort; port <= maxPort; port += 1) {
@@ -307,9 +290,6 @@ export function allocateNextPort(usedPorts: number[], startPort = 4001, maxPort 
   throw new Error('Tidak ada port yang tersedia pada rentang alokasi.');
 }
 
-/**
- * Validates a custom internal TCP port for a server (supports NAT gateway and container forwarded ports).
- */
 export function validateServerPort(
   portInput: unknown,
   usedPorts: number[],
@@ -328,9 +308,6 @@ export function validateServerPort(
   return parsed;
 }
 
-/**
- * Validates email and server name inputs.
- */
 export function validateEmail(email: string): string {
   const normalized = (email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) || normalized.length > 120) {
@@ -401,9 +378,6 @@ export interface ParsedConsoleRuntimeCommand {
   isMutating: boolean;
 }
 
-/**
- * Splits a console command line by top-level `&&` outside quotes while rejecting unsafe shell operators.
- */
 export function splitChainedConsoleCommands(command: string): string[] {
   const trimmed = (command || '').trim();
   if (!trimmed) return [];

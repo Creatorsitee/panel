@@ -21,7 +21,7 @@ function getSafeNextPath(): string {
       return nextParam;
     }
   } catch {
-    // ignore URL parse error
+
   }
   return '/';
 }
@@ -53,7 +53,7 @@ export default function AuthScreen({
           }
         }
       } catch {
-        // not authenticated
+
       }
     }
     void checkExistingSession();

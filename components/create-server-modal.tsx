@@ -94,7 +94,7 @@ export default function CreateServerModal({
         const res = await apiFetch<{ users: AdminUserSummary[] }>('/api/admin/users');
         if (active) setFetchedUsers(res.users);
       } catch {
-        // fallback to currentUserId if user list cannot be loaded
+
       }
     }
     void loadUsers();
@@ -235,11 +235,11 @@ export default function CreateServerModal({
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="space-y-1.5 min-w-0">
               <label
                 htmlFor="srv-name"
-                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate"
               >
                 Nama Server
               </label>
@@ -256,8 +256,8 @@ export default function CreateServerModal({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <span className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            <div className="space-y-1.5 min-w-0">
+              <span className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
                 Runtime Server
               </span>
               <div className="grid grid-cols-2 gap-1 p-0.5 bg-zinc-100 dark:bg-zinc-900 rounded-md border border-zinc-200 dark:border-zinc-800">

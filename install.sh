@@ -49,11 +49,9 @@ echo "Git    : $(git --version)"
 echo "==> [3/6] Membuat konfigurasi .env produksi jika belum ada..."
 cd "$APP_DIR"
 if [ ! -f ".env" ]; then
-  SESSION_SECRET="$(openssl rand -hex 32)"
   cat > .env <<EOF
 NODE_ENV=production
 PORT=${APP_PORT}
-PANEL_SESSION_SECRET=${SESSION_SECRET}
 EOF
   chmod 600 .env
 fi

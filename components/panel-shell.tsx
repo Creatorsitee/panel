@@ -203,7 +203,6 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
         setLastHostSnapshotAt(Date.now());
       }
     } catch {
-      // ignore transient host poll errors
     }
   }, []);
 
@@ -317,7 +316,6 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {
-      // ignore
     }
     setAuthToken(null);
     setUser(null);
@@ -469,7 +467,6 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
           />
         )}
 
-        {/* Sidebar */}
         <aside
           className={`fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50 w-60 shrink-0 lg:h-screen bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-transform duration-150 ${
             mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
@@ -625,7 +622,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                 <div className="text-xs font-semibold truncate flex items-center gap-1.5">
                   <span className="truncate">{user.name}</span>
                   {user.role === 'admin' && (
-                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
+                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
                       admin
                     </span>
                   )}
@@ -647,7 +644,6 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
           </div>
         </aside>
 
-        {/* Main Content */}
         <div className="flex-1 min-w-0 flex flex-col">
           <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">

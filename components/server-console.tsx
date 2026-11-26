@@ -21,7 +21,7 @@ import {
 } from 'recharts';
 import { apiFetch, buildAuthHeaders } from '@/lib/api';
 import { ConsoleLinesSkeleton } from './skeletons';
-import { tokenizeConsoleLine } from '@/lib/console-highlight';
+import JqueryHighlightedText from './console-jquery-highlight';
 import { upsertConsoleLineList } from '@/lib/console-stream';
 import { connectSseStream } from '@/lib/sse';
 import {
@@ -53,7 +53,7 @@ interface MetricSample {
   tx: number;
 }
 
-function useMeasuredChartWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 300): number {
+function useMeasuredChartWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 260): number {
   const [width, setWidth] = useState(fallback);
 
   useEffect(() => {
@@ -116,22 +116,7 @@ function formatTimeLabel(date = new Date()): string {
 }
 
 function renderHighlightedLogText(text: string, defaultClass = ''): React.ReactNode {
-  if (!text) return '\u00A0';
-  const tokens = tokenizeConsoleLine(text, defaultClass);
-  if (tokens.length === 0) return '\u00A0';
-  return (
-    <>
-      {tokens.map((tok, idx) =>
-        tok.className || tok.style ? (
-          <span key={idx} className={tok.className || undefined} style={tok.style}>
-            {tok.text}
-          </span>
-        ) : (
-          <React.Fragment key={idx}>{tok.text}</React.Fragment>
-        )
-      )}
-    </>
-  );
+  return <JqueryHighlightedText text={text} defaultClass={defaultClass} />;
 }
 
 const ConsoleLineRow = React.memo(function ConsoleLineRow({ line }: { line: ConsoleLine }) {
@@ -144,7 +129,7 @@ const ConsoleLineRow = React.memo(function ConsoleLineRow({ line }: { line: Cons
       <div className="whitespace-pre-wrap break-words min-h-5">
         <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
         {isCrashBanner ? (
-          <span className="text-red-400 font-medium">{line.text || '\u00A0'}</span>
+          <JqueryHighlightedText text={line.text} defaultClass="text-red-400 font-medium" />
         ) : (
           renderHighlightedLogText(line.text, 'text-zinc-300')
         )}
@@ -165,7 +150,7 @@ const ConsoleLineRow = React.memo(function ConsoleLineRow({ line }: { line: Cons
       return (
         <div className="whitespace-pre-wrap break-words min-h-5">
           <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
-          <span className="text-zinc-300">{rest || '\u00A0'}</span>
+          {renderHighlightedLogText(rest, 'text-zinc-300')}
         </div>
       );
     }
@@ -232,6 +217,10 @@ export default function ServerConsoleTab({
   const draftCommandRef = useRef('');
   const onMetricsRef = useRef(onMetricsUpdate);
   const lastStreamMetricsAtRef = useRef<number>(0);
+  const [fallbackAnchorMs, setFallbackAnchorMs] = useState<number>(
+    () => Date.now() - Math.max(0, server.metrics.uptimeSeconds) * 1000
+  );
+  const [liveNowMs, setLiveNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
     onMetricsRef.current = onMetricsUpdate;
@@ -296,7 +285,6 @@ export default function ServerConsoleTab({
       },
     });
 
-    // Safety fallback if SSE pauses or delays delivering frames
     const fallbackTimer = setInterval(async () => {
       if (!active) return;
       if (Date.now() - lastStreamMetricsAtRef.current < 2500) return;
@@ -307,7 +295,6 @@ export default function ServerConsoleTab({
         appendMetricSample(res.server.metrics);
         onMetricsRef.current(res.server.metrics);
       } catch {
-        // ignore transient poll errors
       }
     }, 2000);
 
@@ -327,6 +314,38 @@ export default function ServerConsoleTab({
   const powerPerms = getConsolePowerPermissions(metrics.status, Boolean(metrics.awaitingInput));
   const statusDisplayLabel = getStatusDisplayLabel(metrics.status);
   const canSendInput = powerPerms.canSendInput;
+  const isMetricsActive =
+    metrics.status === 'starting' ||
+    metrics.status === 'installing' ||
+    metrics.status === 'running' ||
+    metrics.status === 'stopping';
+
+  const latestMetricsRef = useRef(metrics);
+  useEffect(() => {
+    latestMetricsRef.current = metrics;
+  }, [metrics]);
+
+  useEffect(() => {
+    if (!isMetricsActive) return;
+    const tickTimer = setInterval(() => {
+      const now = Date.now();
+      setLiveNowMs(now);
+      if (now - lastStreamMetricsAtRef.current >= 950) {
+        lastStreamMetricsAtRef.current = now;
+        appendMetricSample(latestMetricsRef.current);
+      }
+    }, 500);
+    return () => clearInterval(tickTimer);
+  }, [isMetricsActive]);
+
+  const displayedUptimeSeconds = useMemo(() => {
+    if (!isMetricsActive) return 0;
+    const anchor =
+      metrics.startedAt && Number.isFinite(Date.parse(metrics.startedAt))
+        ? Date.parse(metrics.startedAt)
+        : fallbackAnchorMs;
+    return Math.max(metrics.uptimeSeconds, Math.floor((liveNowMs - anchor) / 1000));
+  }, [isMetricsActive, metrics.startedAt, metrics.uptimeSeconds, liveNowMs, fallbackAnchorMs]);
 
   useEffect(() => {
     if (canSendInput) {
@@ -372,10 +391,15 @@ export default function ServerConsoleTab({
     setPowerLoading(action);
     const previousMetrics = streamMetrics;
     if (action === 'start' || action === 'restart') {
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      setFallbackAnchorMs(now);
+      setLiveNowMs(now);
       const optimisticStarting: ServerRuntimeMetrics = {
         ...metrics,
         status: 'starting',
         uptimeSeconds: 0,
+        startedAt: nowIso,
         networkRxBytesPerSec: 0,
         networkTxBytesPerSec: 0,
         awaitingInput: false,
@@ -383,6 +407,7 @@ export default function ServerConsoleTab({
       setStreamMetrics(optimisticStarting);
       appendMetricSample(optimisticStarting);
       onMetricsRef.current(optimisticStarting);
+      lastStreamMetricsAtRef.current = 0;
     }
     try {
       const res = await apiFetch<{ metrics: ServerRuntimeMetrics }>(
@@ -416,7 +441,6 @@ export default function ServerConsoleTab({
           onMetricsRef.current(fresh.server.metrics);
         }
       } catch {
-        // ignore secondary refresh failure
       }
       void showErrorToast(
         'Gagal Menjalankan Aksi',
@@ -444,7 +468,6 @@ export default function ServerConsoleTab({
         try {
           window.localStorage.setItem(`cmnty_cmd_history_${server.id}`, JSON.stringify(next));
         } catch {
-          // ignore storage quota errors
         }
         return next;
       });
@@ -606,13 +629,12 @@ export default function ServerConsoleTab({
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-10">
-      {/* Top Power Actions Bar (Pterodactyl Rules) */}
-      <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+      <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-4 gap-1.5 sm:gap-2 text-[11px] sm:text-xs">
         <button
           type="button"
           disabled={!powerPerms.canStart || powerLoading !== null}
           onClick={() => runPowerAction('start')}
-          className="h-8 w-full px-3 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
+          className="h-8 w-full px-1.5 sm:px-3 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
         >
           <Play className="w-3 h-3 shrink-0 fill-white text-white" />
           <span>Start</span>
@@ -621,7 +643,7 @@ export default function ServerConsoleTab({
           type="button"
           disabled={!powerPerms.canRestart || powerLoading !== null}
           onClick={() => runPowerAction('restart')}
-          className="h-8 w-full px-3 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
+          className="h-8 w-full px-1.5 sm:px-3 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
         >
           <RotateCw className="w-3 h-3 shrink-0" />
           <span>Restart</span>
@@ -630,7 +652,7 @@ export default function ServerConsoleTab({
           type="button"
           disabled={!powerPerms.canStop || powerLoading === 'stop' || powerLoading === 'kill'}
           onClick={() => runPowerAction('stop')}
-          className="h-8 w-full px-3 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
+          className="h-8 w-full px-1.5 sm:px-3 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
         >
           <Square className="w-3 h-3 shrink-0" />
           <span>Stop</span>
@@ -639,7 +661,7 @@ export default function ServerConsoleTab({
           type="button"
           disabled={!powerPerms.canKill || powerLoading === 'kill'}
           onClick={() => runPowerAction('kill')}
-          className="h-8 w-full px-3 rounded bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
+          className="h-8 w-full px-1.5 sm:px-3 rounded bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-medium inline-flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer transition-colors whitespace-nowrap disabled:cursor-not-allowed"
           title="Kill paksa proses (SIGKILL)"
         >
           <Skull className="w-3 h-3 shrink-0" />
@@ -647,7 +669,6 @@ export default function ServerConsoleTab({
         </button>
       </div>
 
-      {/* Console Window */}
       <div className="bg-[#09090B] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden flex flex-col">
         <div className="px-3 sm:px-4 py-2 bg-[#111114] border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
           <div className="flex items-center gap-2 text-xs font-mono">
@@ -725,7 +746,6 @@ export default function ServerConsoleTab({
           )}
         </div>
 
-        {/* Integrated Terminal Command Input */}
         <form
           onSubmit={handleSendCommand}
           onClick={() => {
@@ -767,9 +787,7 @@ export default function ServerConsoleTab({
         </form>
       </div>
 
-      {/* Server Metrics & Real-Time Area Charts */}
       <div className="space-y-3">
-        {/* Compact 4-Tile Resource Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
           <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 min-w-0">
             <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate">
@@ -785,7 +803,7 @@ export default function ServerConsoleTab({
               Uptime
             </div>
             <div className="text-sm sm:text-[15px] font-mono font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums mt-0.5 truncate">
-              {formatDuration(metrics.uptimeSeconds)}
+              {formatDuration(displayedUptimeSeconds)}
             </div>
           </div>
 
@@ -814,9 +832,7 @@ export default function ServerConsoleTab({
           </div>
         </div>
 
-        {/* CPU Load, Memory & Network Real-Time Area Charts */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {/* CPU Load Chart Card */}
           <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
               CPU Load
@@ -874,7 +890,6 @@ export default function ServerConsoleTab({
             </div>
           </div>
 
-          {/* Memory Chart Card */}
           <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
               Memory
@@ -932,7 +947,6 @@ export default function ServerConsoleTab({
             </div>
           </div>
 
-          {/* Real-Time Network Chart Card (Inbound / Outbound) */}
           <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0 md:col-span-2 lg:col-span-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">

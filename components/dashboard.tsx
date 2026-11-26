@@ -38,7 +38,7 @@ export default function ServersDashboardView() {
 
   return (
     <div className="space-y-6">
-      {/* Search & Filter Toolbar */}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative flex-1 sm:max-w-sm">
           <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -74,7 +74,6 @@ export default function ServersDashboardView() {
         </div>
       </div>
 
-      {/* Server Cards Grid */}
       {filteredServers.length === 0 ? (
         <div className="py-16 px-4 rounded-lg border border-zinc-200 dark:border-zinc-800 text-center space-y-3 bg-zinc-50/40 dark:bg-zinc-900/20">
           <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">

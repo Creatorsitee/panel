@@ -10,7 +10,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { usePanel } from './panel-shell';
-import { HostStatsSkeleton } from './skeletons';
+import { HostRouteSkeleton } from './skeletons';
 
 function formatHostUptime(totalSec: number): string {
   if (totalSec <= 0) return '0m';
@@ -48,16 +48,7 @@ export default function HostResourcesView() {
   }, [refreshHostInfo]);
 
   if (loadingData && !hostInfo) {
-    return (
-      <div className="space-y-6 pb-12">
-        <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800">
-          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-            Resource Host
-          </h1>
-        </div>
-        <HostStatsSkeleton />
-      </div>
-    );
+    return <HostRouteSkeleton />;
   }
 
   const memPct = hostInfo ? clampPct(hostInfo.usedMemoryMb, hostInfo.totalMemoryMb) : 0;
@@ -89,7 +80,6 @@ export default function HostResourcesView() {
         )}
       </div>
 
-      {/* Comprehensive Resource Host Panel */}
       <section
         aria-label="Resource Host"
         className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 space-y-4"
@@ -99,9 +89,7 @@ export default function HostResourcesView() {
           <span>Ringkasan Sistem &amp; Resource</span>
         </div>
 
-        {/* Row 1: Primary Hardware Utilization Meters */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-          {/* CPU Utilization */}
           <div className="bg-white dark:bg-zinc-950/70 border border-zinc-200/80 dark:border-zinc-800/80 rounded-md p-3 space-y-2 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
@@ -126,7 +114,6 @@ export default function HostResourcesView() {
             </div>
           </div>
 
-          {/* RAM Utilization */}
           <div className="bg-white dark:bg-zinc-950/70 border border-zinc-200/80 dark:border-zinc-800/80 rounded-md p-3 space-y-2 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
@@ -153,7 +140,6 @@ export default function HostResourcesView() {
             </div>
           </div>
 
-          {/* Swap Memory */}
           <div className="bg-white dark:bg-zinc-950/70 border border-zinc-200/80 dark:border-zinc-800/80 rounded-md p-3 space-y-2 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
@@ -184,7 +170,6 @@ export default function HostResourcesView() {
             </div>
           </div>
 
-          {/* Disk Storage */}
           <div className="bg-white dark:bg-zinc-950/70 border border-zinc-200/80 dark:border-zinc-800/80 rounded-md p-3 space-y-2 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
@@ -212,7 +197,6 @@ export default function HostResourcesView() {
           </div>
         </div>
 
-        {/* Row 2: Detailed Host Hardware, Panel Quota Allocation & Runtime Stack */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
           <div className="bg-white/70 dark:bg-zinc-950/40 border border-zinc-200/70 dark:border-zinc-800/70 rounded-md p-3 space-y-1.5 min-w-0">
             <div className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">

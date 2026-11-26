@@ -52,9 +52,6 @@ export function getHostMaxCpuPercent(
   return Math.max(100, Math.round(host.cpuCores * 100));
 }
 
-/**
- * Per-server memory cap: guarantees at least 1 GB (1024 MB) whenever the host has >= 1 GB total RAM.
- */
 export function getPerServerMaxMemoryMb(
   host?: Pick<HostInfo, 'totalMemoryMb'> | null
 ): number {
@@ -66,9 +63,6 @@ export function getPerServerMaxMemoryMb(
   return Math.max(MIN_PREFERRED_MEMORY_MB, Math.min(4096, fairShare));
 }
 
-/**
- * Per-server CPU cap: guarantees at least 50% CPU whenever the host allows it.
- */
 export function getPerServerMaxCpuPercent(
   host?: Pick<HostInfo, 'cpuCores'> | null
 ): number {

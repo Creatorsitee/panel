@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
         try {
           controller.close();
         } catch {
-          // ignore already closed
+
         }
         return;
       }
@@ -92,7 +92,6 @@ export async function GET(req: NextRequest) {
           try {
             controller.close();
           } catch {
-            // ignore
           }
           return;
         }
@@ -106,7 +105,6 @@ export async function GET(req: NextRequest) {
           try {
             controller.close();
           } catch {
-            // ignore
           }
           return;
         }
@@ -194,7 +192,6 @@ export async function GET(req: NextRequest) {
         try {
           controller.close();
         } catch {
-          // ignore already closed
         }
       });
     },

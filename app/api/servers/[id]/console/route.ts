@@ -43,7 +43,7 @@ export async function GET(
         try {
           controller.close();
         } catch {
-          // ignore already closed
+
         }
         return;
       }
@@ -75,18 +75,17 @@ export async function GET(
       let tickCount = 0;
       metricsTimer = setInterval(() => {
         tickCount += 1;
-        if (tickCount % 15 === 0) {
+        if (tickCount % 30 === 0) {
           sendRaw(': ping\n\n');
         }
         sendEvent('metrics', getServerMetrics(id));
-      }, 1000);
+      }, 500);
 
       req.signal.addEventListener('abort', () => {
         cleanup();
         try {
           controller.close();
         } catch {
-          // ignore already closed
         }
       });
     },

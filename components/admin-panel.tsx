@@ -81,7 +81,6 @@ export default function AdminPanelTab({
   const [serverSearch, setServerSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>('all');
 
-  // Create User Modal
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -89,22 +88,18 @@ export default function AdminPanelTab({
   const [newRole, setNewRole] = useState<UserRole>('user');
   const [savingUser, setSavingUser] = useState(false);
 
-  // Edit User Modal
   const [editingUser, setEditingUser] = useState<AdminUserSummary | null>(null);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('user');
   const [editPassword, setEditPassword] = useState('');
 
-  // Create Server Modal (Admin)
   const [createServerOpen, setCreateServerOpen] = useState(false);
 
-  // Transfer Server Ownership Modal
   const [transferServer, setTransferServer] = useState<AdminServerSummary | null>(null);
   const [transferOwnerId, setTransferOwnerId] = useState('');
   const [transferring, setTransferring] = useState(false);
 
-  // Per-server busy state for quick actions
   const [busyServerId, setBusyServerId] = useState<string | null>(null);
   const hasSnapshotRef = useRef(false);
   const onWorkspaceRefreshRef = useRef(onWorkspaceRefresh);
@@ -396,7 +391,6 @@ export default function AdminPanelTab({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
@@ -440,7 +434,6 @@ export default function AdminPanelTab({
         </div>
       </div>
 
-      {/* Overview Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 sm:p-3.5 min-w-0">
           <div className="text-[11px] text-zinc-500 truncate">Total Akun</div>
@@ -573,7 +566,6 @@ export default function AdminPanelTab({
               </div>
             ) : (
               <>
-                {/* Mobile User Cards */}
                 <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800/70">
                   {filteredUsers.map((u) => {
                     const isSelf = u.id === currentUser.id;
@@ -641,7 +633,6 @@ export default function AdminPanelTab({
                   })}
                 </div>
 
-                {/* Desktop User Table */}
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
@@ -790,7 +781,6 @@ export default function AdminPanelTab({
               </div>
             ) : (
               <>
-                {/* Mobile Server Cards */}
                 <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800/70">
                   {filteredServers.map((srv) => {
                     const isRunning = srv.metrics.status === 'running';
@@ -931,7 +921,6 @@ export default function AdminPanelTab({
                   })}
                 </div>
 
-                {/* Desktop Server Table */}
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
@@ -1089,7 +1078,6 @@ export default function AdminPanelTab({
         </div>
       )}
 
-      {/* Create Server Modal (Admin with Owner Selection) */}
       <CreateServerModal
         open={createServerOpen}
         hostInfo={hostInfo}
@@ -1102,7 +1090,6 @@ export default function AdminPanelTab({
         }}
       />
 
-      {/* Create User Modal */}
       {createUserOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -1113,8 +1100,8 @@ export default function AdminPanelTab({
             if (e.target === e.currentTarget && !savingUser) setCreateUserOpen(false);
           }}
         >
-          <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
+          <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 shrink-0">
               <h2 id="admin-create-user-title" className="text-sm font-semibold truncate">
                 Tambah User Baru
               </h2>
@@ -1128,7 +1115,7 @@ export default function AdminPanelTab({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <form onSubmit={handleCreateUser} className="p-4 sm:p-5 space-y-4">
+            <form onSubmit={handleCreateUser} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
               <div className="space-y-1.5">
                 <label htmlFor="adm-new-name" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                   Nama Lengkap
@@ -1208,7 +1195,6 @@ export default function AdminPanelTab({
         </div>
       )}
 
-      {/* Edit User Modal */}
       {editingUser && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -1219,8 +1205,8 @@ export default function AdminPanelTab({
             if (e.target === e.currentTarget && !savingUser) setEditingUser(null);
           }}
         >
-          <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
+          <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 shrink-0">
               <h2 id="admin-edit-user-title" className="text-sm font-semibold truncate">
                 Edit User: {editingUser.name}
               </h2>
@@ -1234,7 +1220,7 @@ export default function AdminPanelTab({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <form onSubmit={handleUpdateUser} className="p-4 sm:p-5 space-y-4">
+            <form onSubmit={handleUpdateUser} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
               <div className="space-y-1.5">
                 <label htmlFor="adm-edit-name" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
                   Nama Lengkap
@@ -1313,7 +1299,6 @@ export default function AdminPanelTab({
         </div>
       )}
 
-      {/* Transfer Ownership Modal */}
       {transferServer && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -1324,8 +1309,8 @@ export default function AdminPanelTab({
             if (e.target === e.currentTarget && !transferring) setTransferServer(null);
           }}
         >
-          <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">
+          <div className="w-full max-w-md bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 shrink-0">
               <h2 id="admin-transfer-title" className="text-sm font-semibold truncate">
                 Pindahkan Pemilik: {transferServer.name}
               </h2>
@@ -1339,7 +1324,7 @@ export default function AdminPanelTab({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <form onSubmit={handleTransferServer} className="p-4 sm:p-5 space-y-4">
+            <form onSubmit={handleTransferServer} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
               <div className="text-xs text-zinc-500">
                 Pemilik saat ini:{' '}
                 <span className="font-medium text-zinc-800 dark:text-zinc-200">

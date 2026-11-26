@@ -5,17 +5,13 @@ import type { NextRequest, NextResponse } from 'next/server';
 import type { PublicUser, UserRecord, UserRole } from './types';
 
 export const SESSION_COOKIE_NAME = 'nodal_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const globalForAuth = globalThis as unknown as {
   __nodalSessionSecret?: string;
 };
 
 function getSessionSecret(): string {
-  const envSecret = process.env.PANEL_SESSION_SECRET?.trim();
-  if (envSecret && envSecret.length >= 16) {
-    return envSecret;
-  }
   if (!globalForAuth.__nodalSessionSecret) {
     const dataRoot = process.env.PANEL_DATA_DIR?.trim()
       ? path.resolve(process.env.PANEL_DATA_DIR.trim())
@@ -149,7 +145,7 @@ export function extractSessionFromRequest(req: NextRequest): SessionPayload | nu
 
   const cookieToken = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (cookieToken) {
-    // Enforce same-origin / custom header check on cookie-authenticated mutations
+
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase())) {
       const origin = req.headers.get('origin');
       const rawHost = req.headers.get('x-forwarded-host') || req.headers.get('host');

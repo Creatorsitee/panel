@@ -17,7 +17,6 @@ export function HostStatsSkeleton() {
         <ShimmerBlock className="h-3.5 w-44" />
       </div>
 
-      {/* Row 1: 4 Hardware Utilization Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[0, 1, 2, 3].map((idx) => (
           <div
@@ -40,7 +39,6 @@ export function HostStatsSkeleton() {
         ))}
       </div>
 
-      {/* Row 2: 3 Technical Spec Cards (Card 2 has 4 rows, Cards 1 & 3 have 3 rows) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
         {[3, 4, 3].map((rowCount, idx) => (
           <div
@@ -192,7 +190,7 @@ export function FileEditorSkeleton() {
   ];
   return (
     <div
-      className="p-3 sm:p-4 space-y-3 min-h-[380px] sm:min-h-[520px] bg-[#09090B]"
+      className="p-3 sm:p-4 space-y-3 min-h-[420px] bg-[#09090B]"
       role="status"
       aria-label="Membuka isi file"
     >
@@ -213,7 +211,6 @@ export function ServerWorkspaceSkeleton({
     <div className="space-y-5 sm:space-y-6" role="status" aria-label="Memuat workspace server">
       <span className="sr-only">Memuat workspace server...</span>
 
-      {/* Server Page Header */}
       <div
         className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800"
         aria-hidden="true"
@@ -231,14 +228,12 @@ export function ServerWorkspaceSkeleton({
 
       {tab === 'console' && (
         <div className="space-y-4 max-w-5xl mx-auto pb-10" aria-hidden="true">
-          {/* Power Bar: 4 equal action buttons */}
-          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:p-3 grid grid-cols-4 gap-1.5 sm:gap-2">
             {[0, 1, 2, 3].map((i) => (
               <ShimmerBlock key={i} className="h-8 w-full rounded" />
             ))}
           </div>
 
-          {/* Console Terminal Card */}
           <div className="bg-[#09090B] border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
             <div className="px-3 sm:px-4 py-2 bg-[#111114] border-b border-zinc-800 flex items-center justify-between">
               <ShimmerBlock className="h-5 w-16 rounded" />
@@ -253,7 +248,6 @@ export function ServerWorkspaceSkeleton({
             </div>
           </div>
 
-          {/* 4-Tile Metrics Row + 3 Area Charts Row (CPU, Memori, Network) */}
           <div className="space-y-3">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
               {[0, 1, 2, 3].map((i) => (
@@ -299,7 +293,7 @@ export function ServerWorkspaceSkeleton({
               <ShimmerBlock className="h-7 w-7 rounded shrink-0" />
               <ShimmerBlock className="h-3.5 w-24" />
             </div>
-            <div className="grid grid-cols-3 sm:flex items-center gap-1.5 w-full sm:w-auto">
+            <div className="grid grid-cols-3 sm:flex sm:items-center gap-1.5 sm:gap-2 shrink-0">
               <ShimmerBlock className="h-8 w-full sm:w-20 rounded" />
               <ShimmerBlock className="h-8 w-full sm:w-24 rounded" />
               <ShimmerBlock className="h-8 w-full sm:w-20 rounded" />
@@ -337,7 +331,7 @@ export function ServerWorkspaceSkeleton({
             <div className="pb-3 border-b border-zinc-200 dark:border-zinc-800">
               <ShimmerBlock className="h-3.5 w-44" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5">
                 <ShimmerBlock className="h-3 w-24" />
                 <ShimmerBlock className="h-9 w-full rounded" />
@@ -346,7 +340,7 @@ export function ServerWorkspaceSkeleton({
                 <ShimmerBlock className="h-3 w-20" />
                 <ShimmerBlock className="h-9 w-full rounded" />
               </div>
-              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="col-span-2 grid grid-cols-2 gap-3 sm:gap-4">
                 <div className="space-y-1.5">
                   <ShimmerBlock className="h-3 w-28" />
                   <ShimmerBlock className="h-9 w-full rounded" />
@@ -356,7 +350,7 @@ export function ServerWorkspaceSkeleton({
                   <ShimmerBlock className="h-9 w-full rounded" />
                 </div>
               </div>
-              <div className="space-y-1.5 sm:col-span-2">
+              <div className="space-y-1.5 col-span-2">
                 <ShimmerBlock className="h-3 w-24" />
                 <ShimmerBlock className="h-9 w-full rounded" />
               </div>
@@ -380,7 +374,6 @@ export function ServerWorkspaceSkeleton({
 export function AdminTableSkeleton({ section = 'users' }: { section?: 'users' | 'servers' }) {
   return (
     <div aria-hidden="true">
-      {/* Mobile Cards */}
       <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800/70">
         {[0, 1, 2].map((i) => (
           <div key={i} className="p-3.5 space-y-3">
@@ -426,7 +419,6 @@ export function AdminTableSkeleton({ section = 'users' }: { section?: 'users' | 
         ))}
       </div>
 
-      {/* Desktop Table */}
       <div className="hidden md:block">
         <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 px-4 py-2.5 grid grid-cols-5 gap-4">
           <ShimmerBlock className="h-3 w-16" />
@@ -453,7 +445,7 @@ export function AdminTableSkeleton({ section = 'users' }: { section?: 'users' | 
                 </div>
                 <ShimmerBlock className="h-5 w-16 rounded" />
                 <div className="flex items-center justify-end gap-1">
-                  <ShimmerBlock className="h-7 w-14 rounded" />
+                  <ShimmerBlock className="w-7 h-7 rounded" />
                   <ShimmerBlock className="w-7 h-7 rounded" />
                   <ShimmerBlock className="h-7 w-14 rounded" />
                   <ShimmerBlock className="w-7 h-7 rounded" />
@@ -494,7 +486,6 @@ export function AdminRouteSkeleton({ section = 'users' }: { section?: 'users' | 
         <ShimmerBlock className="h-10 w-full sm:w-52 rounded" />
       </div>
 
-      {/* 4 Overview Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3" aria-hidden="true">
         {[0, 1, 2, 3].map((i) => (
           <div
@@ -508,19 +499,17 @@ export function AdminRouteSkeleton({ section = 'users' }: { section?: 'users' | 
         ))}
       </div>
 
-      {/* Toolbar */}
       <div
         className={`flex flex-col ${section === 'servers' ? 'lg:flex-row lg:items-center' : 'sm:flex-row sm:items-center'} justify-between gap-3`}
         aria-hidden="true"
       >
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
           <ShimmerBlock className="h-9 w-full sm:max-w-sm rounded" />
-          <ShimmerBlock className={`h-9 w-full ${section === 'servers' ? 'sm:w-72' : 'sm:w-44'} rounded`} />
+          <ShimmerBlock className={`h-9 w-full ${section === 'servers' ? 'sm:w-80' : 'sm:w-44'} rounded`} />
         </div>
         <ShimmerBlock className={`h-9 w-full ${section === 'servers' ? 'lg:w-32' : 'sm:w-32'} rounded`} />
       </div>
 
-      {/* Table */}
       <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-white dark:bg-[#0C0C0E]">
         <AdminTableSkeleton section={section} />
       </div>
@@ -545,7 +534,6 @@ export function WorkspaceBootSkeleton({
     >
       <span className="sr-only">Memuat panel cmnty...</span>
 
-      {/* Sidebar Skeleton matching PanelContext */}
       <aside
         className="hidden lg:flex lg:sticky lg:top-0 lg:h-screen w-60 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex-col shrink-0"
         aria-hidden="true"
@@ -589,7 +577,6 @@ export function WorkspaceBootSkeleton({
         </div>
       </aside>
 
-      {/* Main Content Skeleton */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header
           className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4"
@@ -599,7 +586,7 @@ export function WorkspaceBootSkeleton({
             <ShimmerBlock className="lg:hidden w-8 h-8 rounded shrink-0" />
             <ShimmerBlock className="h-4 w-36 sm:w-48" />
           </div>
-          <ShimmerBlock className="h-8 w-24 sm:w-28 rounded" />
+          <ShimmerBlock className={`h-8 rounded ${routeKind === 'server' ? 'w-28' : 'w-24 sm:w-28'}`} />
         </header>
 
         <main className="flex-1 min-w-0 p-4 sm:p-6 max-w-6xl w-full mx-auto">

@@ -595,7 +595,7 @@ function cleanupNetMonitor(state: ManagedProcess): void {
     try {
       state.netSockServer.close();
     } catch {
-      // ignore
+
     }
     state.netSockServer = null;
   }
@@ -603,7 +603,7 @@ function cleanupNetMonitor(state: ManagedProcess): void {
     try {
       fs.rmSync(state.netSockPath, { force: true });
     } catch {
-      // ignore
+
     }
     state.netSockPath = null;
   }
@@ -652,14 +652,12 @@ async function setupNetMonitor(serverId: string, state: ManagedProcess): Promise
               );
             }
           } catch {
-            // ignore malformed frame
           }
         }
         nl = buf.indexOf('\n');
       }
     });
     conn.on('error', () => {
-      // ignore client disconnect
     });
   });
 
@@ -672,7 +670,7 @@ async function setupNetMonitor(serverId: string, state: ManagedProcess): Promise
     };
     server.once('listening', finish);
     server.on('error', () => {
-      // ignore transient socket errors and avoid hanging startup
+
       finish();
     });
     server.listen(sockPath);
@@ -784,7 +782,6 @@ function collectProcessGroupPids(rootPid: number): number[] {
           else pgrpMembers.set(pgrp, [pid]);
         }
       } catch {
-        // process may have exited while scanning
       }
     }
 
@@ -811,7 +808,6 @@ function collectProcessGroupPids(rootPid: number): number[] {
       }
     }
   } catch {
-    // fallback to rootPid only
   }
   return Array.from(pids);
 }
@@ -844,7 +840,7 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
   }
 
   const now = Date.now();
-  if (state.lastSampleTimeMs !== undefined && now - state.lastSampleTimeMs < 800) {
+  if (state.lastSampleTimeMs !== undefined && now - state.lastSampleTimeMs < 200) {
     return { cpuPercent: state.cpuPercent, memoryMb: state.memoryMb };
   }
 
@@ -867,7 +863,6 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
           }
         }
       } catch {
-        // ignore transient pid exit
       }
 
       try {
@@ -884,7 +879,6 @@ function readLinuxProcStats(state: ManagedProcess): { cpuPercent: number; memory
           }
         }
       } catch {
-        // ignore transient pid exit
       }
     }
 
@@ -1072,13 +1066,11 @@ function killProcessTree(
       process.kill(-pid, signal);
       return;
     } catch {
-      // fallback to direct kill
     }
   }
   try {
     child.kill(signal);
   } catch {
-    // ignore already exited
   }
 }
 
@@ -1101,7 +1093,6 @@ function runProcessCommand(
     state.pid = child.pid ?? null;
     emitStatus(serverId);
     child.stdin.on('error', () => {
-      // ignore EPIPE if process exits mid-write
     });
 
     const stdoutDecoder = new StringDecoder('utf8');
@@ -1249,7 +1240,6 @@ async function ensureServerDependencies(server: ServerConfig, cwd: string): Prom
     return;
   }
 
-  // Python runtime auto-install from requirements.txt
   const reqPath = path.join(cwd, 'requirements.txt');
   if (!fs.existsSync(reqPath)) {
     return;
@@ -1437,13 +1427,23 @@ async function launchServerProcess(
   state.child = child;
   state.stdinActive = false;
   state.pid = child.pid ?? null;
-  state.startedAtMs = Date.now();
+  state.startedAtMs = state.startedAtMs ?? Date.now();
   state.status = 'running';
+  readLinuxProcStats(state);
   appendLog(serverId, 'system', 'Server marked as running...');
   emitStatus(serverId);
+  setTimeout(() => {
+    if (state.pid && state.status === 'running') {
+      emitStatus(serverId);
+    }
+  }, 250);
+  setTimeout(() => {
+    if (state.pid && state.status === 'running') {
+      emitStatus(serverId);
+    }
+  }, 600);
 
   child.stdin.on('error', () => {
-    // ignore EPIPE if process exits mid-write
   });
 
   const stdoutDecoder = new StringDecoder('utf8');
@@ -1604,13 +1604,7 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
   state.status = requiresInstall ? 'installing' : 'starting';
   emitStatus(serverId);
 
-  if (requiresInstall) {
-    // Run dependency installation and process launch asynchronously so power API does not time out
-    void launchServerProcess(server, cwd, parsed, false);
-    return getServerMetrics(serverId);
-  }
-
-  await launchServerProcess(server, cwd, parsed, true);
+  void launchServerProcess(server, cwd, parsed, !requiresInstall);
   return getServerMetrics(serverId);
 }
 
@@ -1803,7 +1797,6 @@ function getSystemVersions(): {
         osDistro = parseOsPrettyName(content, osDistro);
       }
     } catch {
-      // fallback to os.type() + os.release()
     }
 
     let npmVersion: string | null = null;
@@ -1868,7 +1861,6 @@ function getPrimaryIpv4Address(): string | null {
       }
     }
   } catch {
-    // ignore network interface lookup failures
   }
   return null;
 }
@@ -1909,7 +1901,6 @@ function primeHostCpuBaseline(): void {
       }
     }
   } catch {
-    // ignore
   }
 }
 
@@ -1932,7 +1923,6 @@ function detectHostCpuPercent(load1m: number, cpuCores: number): number {
       return result.percent;
     }
   } catch {
-    // fallback below
   }
   return currentSampler.lastPercent ?? fallback;
 }
@@ -1944,7 +1934,6 @@ function detectSwapMb(): { swapTotalMb: number; swapUsedMb: number; swapFreeMb: 
       return parseMeminfoSwapMb(meminfo);
     }
   } catch {
-    // ignore
   }
   return { swapTotalMb: 0, swapUsedMb: 0, swapFreeMb: 0 };
 }
@@ -1962,11 +1951,10 @@ function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
       }
     }
   } catch {
-    // fallback to os.freemem()
   }
 
   try {
-    // cgroup v2 memory limit & usage
+
     if (fs.existsSync('/sys/fs/cgroup/memory.max')) {
       const rawMax = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
       const parsedMax = Number(rawMax);
@@ -1998,7 +1986,6 @@ function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
       }
     }
 
-    // cgroup v1 memory limit & usage
     if (fs.existsSync('/sys/fs/cgroup/memory/memory.limit_in_bytes')) {
       const rawMax = Number(
         fs
@@ -2035,7 +2022,6 @@ function detectEffectiveMemoryMb(): { totalMemMb: number; freeMemMb: number } {
       }
     }
   } catch {
-    // fallback to os.totalmem()
   }
 
   return { totalMemMb: osTotalMb, freeMemMb: osFreeMb };
@@ -2068,7 +2054,6 @@ function detectEffectiveCpuCores(hostCpuCount: number): number {
       }
     }
   } catch {
-    // fallback to os.cpus()
   }
   return baseCores;
 }
@@ -2088,7 +2073,6 @@ function resolveCpuModel(rawModel: string | undefined, arch: string): string {
       }
     }
   } catch {
-    // fallback below
   }
   return `Virtual CPU (${arch})`;
 }

@@ -19,6 +19,8 @@ import { apiFetch } from '@/lib/api';
 import { usePanel } from './panel-shell';
 import { FileEditorSkeleton, FileManagerSkeleton } from './skeletons';
 import { isEditableTextFile } from '@/lib/file-types';
+import { resolveCodeLanguage } from '@/lib/code-language';
+import CodeEditor from './code-editor';
 import {
   showConfirmDialog,
   showErrorAlert,
@@ -74,11 +76,9 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     right: number;
   } | null>(null);
 
-  // Single or bulk Move modal
   const [moveModalPaths, setMoveModalPaths] = useState<string[] | null>(null);
   const [newDestPath, setNewDestPath] = useState('');
 
-  // Rename modal
   const [renameModalPath, setRenameModalPath] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -557,7 +557,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto pb-20 relative">
-      {/* File Manager Toolbar */}
       {!selectedFile && (
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:px-3.5 sm:py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <nav
@@ -692,7 +691,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         </form>
       )}
 
-      {/* Rename Modal */}
       {renameModalPath && (
         <form
           onSubmit={handleRenameEntry}
@@ -730,7 +728,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         </form>
       )}
 
-      {/* Move Modal (Single or Multi) */}
       {moveModalPaths && moveModalPaths.length > 0 && (
         <form
           onSubmit={handleMoveEntries}
@@ -775,7 +772,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         </form>
       )}
 
-      {/* Full Card View when File is Selected vs File List */}
       {selectedFile ? (
         <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-[#09090B] flex flex-col shadow-xl">
           <div className="px-3 sm:px-4 py-2.5 bg-[#141820] border-b border-zinc-800 flex items-center justify-between gap-2 sm:gap-3">
@@ -808,32 +804,34 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
               </span>
             </div>
 
-            <button
-              type="button"
-              disabled={saving || loadingFile || !hasUnsavedChanges}
-              onClick={saveCurrentFile}
-              className="h-7 px-3 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0"
-            >
-              <Save className="w-3 h-3" />
-              <span>{saving ? 'Menyimpan...' : 'Simpan'}</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/70 text-[10px] font-mono text-zinc-400">
+                {resolveCodeLanguage(selectedFile).name}
+              </span>
+              <button
+                type="button"
+                disabled={saving || loadingFile || !hasUnsavedChanges}
+                onClick={saveCurrentFile}
+                className="h-7 px-3 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+              >
+                <Save className="w-3 h-3" />
+                <span>{saving ? 'Menyimpan...' : 'Simpan'}</span>
+              </button>
+            </div>
           </div>
 
           {loadingFile ? (
             <FileEditorSkeleton />
           ) : (
-            <textarea
-              aria-label={`Editor kode untuk ${selectedFile}`}
+            <CodeEditor
+              filename={selectedFile}
               value={fileContent}
-              onChange={(e) => setFileContent(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-                  e.preventDefault();
-                  if (hasUnsavedChanges) saveCurrentFile();
+              onChange={setFileContent}
+              onSave={() => {
+                if (hasUnsavedChanges && !saving) {
+                  void saveCurrentFile();
                 }
               }}
-              spellCheck={false}
-              className="w-full flex-1 min-h-[380px] sm:min-h-[520px] p-3 sm:p-4 bg-[#09090B] text-zinc-100 font-mono text-xs leading-relaxed focus:outline-none resize-none"
             />
           )}
         </div>
@@ -845,7 +843,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             <div className="p-8 text-xs text-zinc-500 text-center">Direktori ini masih kosong.</div>
           ) : (
             <>
-              {/* Select All Header Row */}
               {selectableEntries.length > 0 && (
                 <div className="px-3 sm:px-4 py-2 bg-zinc-50/80 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-[11px] text-zinc-500">
                   <label className="inline-flex items-center gap-3 cursor-pointer select-none">
@@ -888,7 +885,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                         isChecked ? 'bg-zinc-100/70 dark:bg-zinc-900/80' : ''
                       }`}
                     >
-                      {/* Left Checkbox + Icon + Name */}
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <input
                           type="checkbox"
@@ -931,7 +927,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                         </button>
                       </div>
 
-                      {/* Right Size + 3-Dot Action Menu */}
                       <div className="flex items-center gap-2.5 shrink-0">
                         {entry.type === 'file' && (
                           <span className="text-[11px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500 hidden sm:inline">
@@ -1063,7 +1058,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
         </div>
       )}
 
-      {/* Floating Multi-Select Action Bar (Matching cmnty Theme) */}
       {!selectedFile && selectedPaths.length > 0 && (
         <div className="sticky bottom-4 z-30 flex justify-center pointer-events-none">
           <div className="pointer-events-auto inline-flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg bg-white/95 dark:bg-zinc-900/95 backdrop-blur border border-zinc-200 dark:border-zinc-700 shadow-2xl">

@@ -88,14 +88,13 @@ export function verifyServerPythonModule(
     return;
   }
 
-  // Known runner (uvicorn, gunicorn, flask, fastapi, celery, streamlit, pytest, etc.)
   const ignoredSubcommands = new Set(['run', 'dev', 'worker', 'beat', 'flower']);
   const candidateTargets: string[] = [];
 
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
     if (token === '-m') {
-      i += 1; // skip moduleName itself
+      i += 1;
       continue;
     }
     if ((token === '--app' || token === '-A') && args[i + 1]) {
