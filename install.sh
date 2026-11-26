@@ -13,16 +13,33 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_PORT="${PORT:-3000}"
 SERVICE_NAME="cmnty-panel"
 
+wait_for_apt() {
+  local waited=0
+  while pgrep -x apt-get >/dev/null 2>&1 || pgrep -x apt >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1 || pgrep -f unattended-upgrade >/dev/null 2>&1; do
+    if [ "$waited" -eq 0 ]; then
+      echo "Menunggu proses apt/dpkg lain di sistem selesai..."
+    fi
+    sleep 3
+    waited=$((waited + 3))
+    if [ "$waited" -ge 180 ]; then
+      echo "Proses apt lain masih berjalan setelah 180 detik, mencoba melanjutkan..."
+      break
+    fi
+  done
+}
+
 echo "==> [1/6] Memperbarui paket sistem & memasang dependensi dasar (git, curl, python3, pip3)..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y curl git ca-certificates gnupg python3 python3-pip python3-venv build-essential
+wait_for_apt
+apt-get -o DPkg::Lock::Timeout=120 update -y
+apt-get -o DPkg::Lock::Timeout=120 install -y curl git ca-certificates gnupg python3 python3-pip python3-venv build-essential
 
 echo "==> [2/6] Memeriksa runtime Node.js..."
 if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 20 ]; then
   echo "Memasang Node.js 22 LTS..."
+  wait_for_apt
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  apt-get install -y nodejs
+  apt-get -o DPkg::Lock::Timeout=120 install -y nodejs
 fi
 
 echo "Node.js: $(node -v)"
