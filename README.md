@@ -1,6 +1,6 @@
 <div align="center">
 
-# cmnty — Node.js & Python Server Management Panel
+# cmnty panel — Node.js & Python Server
 
 **A lightweight, self-hosted server management panel for Node.js and Python applications — built for VPS, Docker, local hosts, and cloud containers.**
 
@@ -39,37 +39,31 @@
 
 | Servers Dashboard | Real-Time Console & Telemetry |
 | :---: | :---: |
-| <img src="docs/screenshots/dashboard.png" alt="Dasbor Server" width="100%" /> | <img src="docs/screenshots/console.png" alt="Konsol Server" width="100%" /> |
-| Filter instance berdasarkan runtime (`Semua Runtime` / `Node.js` / `Python`), cari berdasarkan nama atau port, dan pantau penggunaan CPU & RAM secara langsung di semua server. | Kontrol daya (`Start`, `Restart`, `Stop`, `Kill`), streaming log ANSI/semantik ber-highlight jQuery, bar `stdin` interaktif, serta grafik CPU/Memory/Network langsung. |
+| <img src="docs/screenshots/dashboard.png" alt="Servers Dashboard" width="100%" /> | <img src="docs/screenshots/console.png" alt="Server Console" width="100%" /> |
 
 | Create Server Modal | Server Settings |
 | :---: | :---: |
-| <img src="docs/screenshots/create-server.png" alt="Modal Buat Server" width="100%" /> | <img src="docs/screenshots/settings.png" alt="Pengaturan Server" width="100%" /> |
-| Deploy instance Node.js atau Python baru dengan preset runtime, penugasan pemilik, perintah startup, dan batas memori/CPU yang dibatasi host. | Perintah startup simpan-otomatis, toggle auto-restart, nama & catatan server, konfigurasi port internal, dan penghapusan server yang aman. |
+| <img src="docs/screenshots/create-server.png" alt="Create Server Modal" width="100%" /> | <img src="docs/screenshots/settings.png" alt="Server Settings" width="100%" /> |
 
 ### Integrated File Manager, Code Editor & Host Resources
 
 | Integrated File Manager | Multi-Language CodeMirror Editor |
 | :---: | :---: |
-| <img src="docs/screenshots/files.png" alt="Manajer File" width="100%" /> | <img src="docs/screenshots/code-editor.png" alt="Editor Kode CodeMirror" width="100%" /> |
-| Jelajahi direktori melalui breadcrumbs, buat file/folder, multi-upload, ubah nama, pindahkan, arsip/ekstrak `.zip`, dan hapus file massal dengan aman. | Editor CodeMirror 6 inline dengan highlight syntax untuk 100+ bahasa, nomor baris, pelipatan kode, pencarian (`Ctrl+F`), dan penyimpanan `Ctrl+S`. |
+| <img src="docs/screenshots/files.png" alt="File Manager" width="100%" /> | <img src="docs/screenshots/code-editor.png" alt="CodeMirror Code Editor" width="100%" /> |
 
 | Host System & Runtime Overview | Authentication Screen |
 | :---: | :---: |
-| <img src="docs/screenshots/host-resources.png" alt="Sumber Daya Host" width="100%" /> | <img src="docs/screenshots/login.png" alt="Layar Masuk" width="100%" /> |
-| Periksa OS host, kernel, beban CPU, memori sistem/cgroup, swap, penggunaan disk, kuota panel yang dialokasikan, dan versi Node.js/Python/npm/pip yang terinstal. | Layar masuk dan pendaftaran yang bersih dengan orientasi admin pertama otomatis serta dukungan sesi cookie + bearer. |
+| <img src="docs/screenshots/host-resources.png" alt="Host Resources" width="100%" /> | <img src="docs/screenshots/login.png" alt="Login Screen" width="100%" /> |
 
 ### Administration & Mobile Responsive UI
 
 | Admin Server Management (`/admin/server`) | Admin User Management (`/admin/user`) |
 | :---: | :---: |
-| <img src="docs/screenshots/admin.png" alt="Manajemen Server Admin" width="100%" /> | <img src="docs/screenshots/admin-users.png" alt="Manajemen Pengguna Admin" width="100%" /> |
-| Audit semua server, filter berdasarkan status, pantau konsumsi RAM/CPU secara langsung, picu tindakan power jarak jauh, atau transfer kepemilikan. | Kelola akun pengguna, tetapkan peran `ADMIN` atau `USER`, periksa jumlah server per pengguna, dan audit kuota panel aktif. |
+| <img src="docs/screenshots/admin.png" alt="Admin Server Management" width="100%" /> | <img src="docs/screenshots/admin-users.png" alt="Admin User Management" width="100%" /> |
 
 | Mobile Responsive Dashboard | Mobile Responsive Console |
 | :---: | :---: |
-| <img src="docs/screenshots/mobile-dashboard.png" alt="Dasbor Seluler" width="320" /> | <img src="docs/screenshots/mobile-console.png" alt="Konsol Seluler" width="320" /> |
-| Kartu server satu kolom yang rapi, filter runtime, dan navigasi laci slide-out yang dioptimalkan untuk layar ponsel. | Bar power 4 tombol berdampingan, log terminal responsif, dan kartu telemetri 2 kolom tanpa luapan horizontal. |
+| <img src="docs/screenshots/mobile-dashboard.png" alt="Mobile Dashboard" width="320" /> | <img src="docs/screenshots/mobile-console.png" alt="Mobile Console" width="320" /> |
 
 ---
 
