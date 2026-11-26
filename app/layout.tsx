@@ -1,7 +1,22 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const appUrl = process.env.APP_URL || 'http://localhost:3000';
+function resolveAppUrl(): string {
+  const candidate =
+    process.env.APP_URL?.trim() ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN.trim()}`
+      : '') ||
+    'http://localhost:3000';
+  const normalized = /^https?:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
+  try {
+    return new URL(normalized).origin;
+  } catch {
+    return 'http://localhost:3000';
+  }
+}
+
+const appUrl = resolveAppUrl();
 const siteTitle = 'cmnty — Node.js & Python Server Management Panel';
 const siteDescription =
   'Panel manajemen server mandiri untuk mengelola aplikasi Node.js dan Python secara real-time di server maupun Railway.';

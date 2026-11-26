@@ -17,7 +17,10 @@ function getSessionSecret(): string {
     return envSecret;
   }
   if (!globalForAuth.__nodalSessionSecret) {
-    const secretFile = path.join(process.cwd(), 'data', '.session-secret');
+    const dataRoot = process.env.PANEL_DATA_DIR?.trim()
+      ? path.resolve(process.env.PANEL_DATA_DIR.trim())
+      : path.join(process.cwd(), 'data');
+    const secretFile = path.join(dataRoot, '.session-secret');
     try {
       if (fs.existsSync(secretFile)) {
         const persisted = fs.readFileSync(secretFile, 'utf8').trim();

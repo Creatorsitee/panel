@@ -963,7 +963,7 @@ export default function AdminPanelTab({
                               >
                                 {srv.name}
                               </Link>
-                              <div className="text-[11px] font-mono text-zinc-500">
+                              <div className="text-[11px] font-mono text-zinc-500 max-w-[240px] lg:max-w-sm truncate">
                                 {srv.runtime} · :{srv.port} · {srv.startupCommand}
                               </div>
                             </td>

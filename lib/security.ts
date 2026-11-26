@@ -349,3 +349,275 @@ export function validateServerName(name: string): string {
   }
   return trimmed;
 }
+
+const CONSOLE_PIP_BINARIES = new Set(['pip', 'pip3']);
+const ALL_CONSOLE_RUNTIME_BINARIES = new Set([
+  ...ALL_ALLOWED_BINARIES,
+  ...CONSOLE_PIP_BINARIES,
+]);
+
+const FORBIDDEN_CONSOLE_SHELL_CHARS = /[;|`$><\r\n\0]/;
+const ALLOWED_NPM_CONSOLE_SUBCOMMANDS = new Set([
+  'install',
+  'i',
+  'add',
+  'uninstall',
+  'remove',
+  'rm',
+  'un',
+  'update',
+  'up',
+  'ci',
+  'list',
+  'ls',
+  'outdated',
+  'run',
+  'start',
+  'test',
+  'init',
+  'pkg',
+  'view',
+  'info',
+  'audit',
+  'version',
+  'exec',
+  'prune',
+  'dedupe',
+  'rebuild',
+]);
+const ALLOWED_PIP_CONSOLE_SUBCOMMANDS = new Set([
+  'install',
+  'uninstall',
+  'list',
+  'show',
+  'freeze',
+  'check',
+]);
+
+export interface ParsedConsoleRuntimeCommand {
+  executable: string;
+  args: string[];
+  kind: 'nodejs' | 'python' | 'pip';
+  isMutating: boolean;
+}
+
+/**
+ * Splits a console command line by top-level `&&` outside quotes while rejecting unsafe shell operators.
+ */
+export function splitChainedConsoleCommands(command: string): string[] {
+  const trimmed = (command || '').trim();
+  if (!trimmed) return [];
+  if (FORBIDDEN_CONSOLE_SHELL_CHARS.test(trimmed)) {
+    throw new Error('Operator shell (;|`$><) tidak diizinkan di console container.');
+  }
+
+  const segments: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < trimmed.length) {
+        current += ch + trimmed[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      current += ch;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '&') {
+      if (trimmed[i + 1] === '&') {
+        const seg = current.trim();
+        if (!seg) {
+          throw new Error('Sintaks operator "&&" tidak valid.');
+        }
+        segments.push(seg);
+        current = '';
+        i += 1;
+        continue;
+      }
+      throw new Error('Operator background "&" tidak didukung. Gunakan "&&" untuk merangkai perintah.');
+    }
+
+    current += ch;
+  }
+
+  if (quote) {
+    throw new Error('Tanda kutip pada perintah tidak seimbang.');
+  }
+
+  const tail = current.trim();
+  if (!tail) {
+    throw new Error('Sintaks operator "&&" tidak lengkap.');
+  }
+  segments.push(tail);
+  return segments;
+}
+
+export function tokenizeConsoleCommand(segment: string): string[] {
+  const trimmed = (segment || '').trim();
+  if (!trimmed) return [];
+  if (FORBIDDEN_CONSOLE_SHELL_CHARS.test(trimmed)) {
+    throw new Error('Operator shell (;|`$><) tidak diizinkan.');
+  }
+
+  const tokens: string[] = [];
+  let current = '';
+  let hasToken = false;
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < trimmed.length) {
+        current += trimmed[i + 1];
+        i += 1;
+        hasToken = true;
+      } else if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      hasToken = true;
+    } else if (/\s/.test(ch)) {
+      if (hasToken) {
+        tokens.push(current);
+        current = '';
+        hasToken = false;
+      }
+    } else {
+      current += ch;
+      hasToken = true;
+    }
+  }
+
+  if (quote) {
+    throw new Error('Tanda kutip pada perintah tidak seimbang.');
+  }
+  if (hasToken) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+export function assertSafeConsolePathArg(arg: string): void {
+  if (!arg) return;
+  if (arg === '~' || arg.startsWith('~/')) {
+    throw new Error(`Path "${arg}" berada di luar direktori container.`);
+  }
+  if (arg.startsWith('/home/container/') || arg === '/home/container') {
+    return;
+  }
+  assertRelativeWorkspaceArg(arg);
+}
+
+export function parseSafeConsoleRuntimeCommand(tokens: string[]): ParsedConsoleRuntimeCommand | null {
+  if (tokens.length === 0) return null;
+  const rawExec = tokens[0];
+  if (rawExec.includes('/') || rawExec.includes('\\')) {
+    throw new Error('Gunakan nama binary langsung (mis. npm, node, python3, pip), bukan path.');
+  }
+
+  const executable = path.basename(rawExec);
+  if (!ALL_CONSOLE_RUNTIME_BINARIES.has(executable)) {
+    return null;
+  }
+
+  const args = tokens.slice(1);
+
+  for (const arg of args) {
+    if (arg.startsWith('-')) {
+      const eqIdx = arg.indexOf('=');
+      const flagName = eqIdx !== -1 ? arg.slice(0, eqIdx) : arg;
+      const flagVal = eqIdx !== -1 ? arg.slice(eqIdx + 1) : '';
+
+      if (NODE_ALLOWED_BINARIES.has(executable) && FORBIDDEN_NODE_FLAGS.has(flagName)) {
+        throw new Error(`Flag "${flagName}" tidak diizinkan di console.`);
+      }
+      if (executable === 'npx' && FORBIDDEN_NPX_FLAGS.has(flagName)) {
+        throw new Error(`Flag "${flagName}" tidak diizinkan pada npx.`);
+      }
+      if (PYTHON_DIRECT_BINARIES.has(executable) && FORBIDDEN_PYTHON_FLAGS.has(flagName)) {
+        throw new Error(`Flag "${flagName}" tidak diizinkan di console.`);
+      }
+      if (executable === 'npm' && (flagName === '-g' || flagName === '--global' || flagName === '--prefix')) {
+        throw new Error(`Flag "${flagName}" tidak diizinkan; instalasi hanya berlaku di direktori server ini.`);
+      }
+      if (CONSOLE_PIP_BINARIES.has(executable) && (flagName === '--root' || flagName === '--prefix' || flagName === '--user')) {
+        throw new Error(`Flag "${flagName}" tidak diizinkan pada ${executable}.`);
+      }
+      if (flagVal) {
+        assertRelativeWorkspaceArg(flagVal);
+      }
+    } else {
+      assertRelativeWorkspaceArg(arg);
+    }
+  }
+
+  if (executable === 'npm') {
+    if (args.length === 0) {
+      throw new Error('Sertakan subcommand npm (mis. npm install <paket>, npm list, npm -v).');
+    }
+    const first = args[0];
+    const isMetaFlag = first === '-v' || first === '--version' || first === '-h' || first === '--help';
+    if (!isMetaFlag && !ALLOWED_NPM_CONSOLE_SUBCOMMANDS.has(first)) {
+      throw new Error(`Subcommand npm "${first}" tidak didukung di console.`);
+    }
+    const mutatingSet = new Set(['install', 'i', 'add', 'uninstall', 'remove', 'rm', 'un', 'update', 'up', 'ci', 'init', 'prune', 'dedupe', 'rebuild']);
+    return {
+      executable,
+      args,
+      kind: 'nodejs',
+      isMutating: mutatingSet.has(first),
+    };
+  }
+
+  if (CONSOLE_PIP_BINARIES.has(executable)) {
+    if (args.length === 0) {
+      throw new Error(`Sertakan subcommand ${executable} (mis. ${executable} install <paket>, ${executable} list).`);
+    }
+    const first = args[0];
+    const isMetaFlag = first === '-V' || first === '--version' || first === '-h' || first === '--help';
+    if (!isMetaFlag && !ALLOWED_PIP_CONSOLE_SUBCOMMANDS.has(first)) {
+      throw new Error(`Subcommand ${executable} "${first}" tidak didukung di console.`);
+    }
+    return {
+      executable,
+      args,
+      kind: 'pip',
+      isMutating: first === 'install' || first === 'uninstall',
+    };
+  }
+
+  if (PYTHON_ALLOWED_BINARIES.has(executable)) {
+    const mIdx = args.indexOf('-m');
+    const isPipModule = mIdx !== -1 && args[mIdx + 1] === 'pip';
+    return {
+      executable,
+      args,
+      kind: isPipModule ? 'pip' : 'python',
+      isMutating: isPipModule && (args.includes('install') || args.includes('uninstall')),
+    };
+  }
+
+  return {
+    executable,
+    args,
+    kind: 'nodejs',
+    isMutating: false,
+  };
+}
+

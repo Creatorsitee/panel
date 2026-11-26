@@ -460,7 +460,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
 
   return (
     <PanelContext.Provider value={contextValue}>
-      <div className="min-h-screen bg-white dark:bg-[#09090B] text-zinc-900 dark:text-zinc-100 flex">
+      <div className="min-h-screen bg-white dark:bg-[#09090B] text-zinc-900 dark:text-zinc-100 flex overflow-x-clip">
         {mobileNavOpen && (
           <div
             className="fixed inset-0 z-40 bg-black/50 lg:hidden"
@@ -471,7 +471,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
 
         {/* Sidebar */}
         <aside
-          className={`fixed lg:static inset-y-0 left-0 z-50 w-60 shrink-0 bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-transform duration-150 ${
+          className={`fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50 w-60 shrink-0 lg:h-screen bg-zinc-50 dark:bg-[#0C0C0E] border-r border-zinc-200 dark:border-zinc-800 flex flex-col transition-transform duration-150 ${
             mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
           }`}
         >
@@ -649,8 +649,8 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
 
         {/* Main Content */}
         <div className="flex-1 min-w-0 flex flex-col">
-          <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-4 sm:px-5 flex items-center justify-between gap-3 sm:gap-4">
-            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
@@ -663,21 +663,29 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
               <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 sm:gap-2 text-xs min-w-0">
                 <Link
                   href="/"
-                  className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors whitespace-nowrap shrink-0"
+                  className={`text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors whitespace-nowrap shrink-0 ${
+                    activeServerId || (isAdminRoute && user.role === 'admin') ? 'hidden sm:inline' : ''
+                  }`}
                 >
                   Panel
                 </Link>
-                <span className="text-zinc-400 shrink-0">/</span>
+                <span
+                  className={`text-zinc-400 shrink-0 ${
+                    activeServerId || (isAdminRoute && user.role === 'admin') ? 'hidden sm:inline' : ''
+                  }`}
+                >
+                  /
+                </span>
                 {activeServerId ? (
                   <>
                     <Link
                       href={`/server/${encodedServerId}`}
-                      className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline truncate max-w-[110px] sm:max-w-xs"
+                      className="font-semibold text-zinc-900 dark:text-zinc-100 hover:underline truncate max-w-[130px] sm:max-w-xs"
                     >
                       {activeServer ? activeServer.name : activeServerId}
                     </Link>
                     <span className="text-zinc-400 shrink-0">/</span>
-                    <span className="text-zinc-600 dark:text-zinc-400 whitespace-nowrap truncate">
+                    <span className="text-zinc-600 dark:text-zinc-400 whitespace-nowrap shrink-0">
                       {activeTabLabel}
                     </span>
                   </>
@@ -710,7 +718,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
               {activeServerId ? (
                 <Link
                   href="/"
-                  className="h-8 px-3 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  className="h-8 px-2.5 sm:px-3 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Semua Server</span>
@@ -719,7 +727,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
                 <button
                   type="button"
                   onClick={openCreateModal}
-                  className="h-8 px-3.5 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  className="h-8 px-2.5 sm:px-3.5 rounded bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-100 text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Buat Server</span>
@@ -728,7 +736,7 @@ export default function PanelShell({ children }: { children: React.ReactNode }) 
             </div>
           </header>
 
-          <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
+          <main className="flex-1 min-w-0 p-4 sm:p-6 max-w-6xl w-full mx-auto">
             {children}
           </main>
         </div>

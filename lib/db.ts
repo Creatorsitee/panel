@@ -9,7 +9,9 @@ interface DatabaseState {
   servers: ServerConfig[];
 }
 
-const DATA_ROOT = path.join(process.cwd(), 'data');
+export const DATA_ROOT = process.env.PANEL_DATA_DIR?.trim()
+  ? path.resolve(process.env.PANEL_DATA_DIR.trim())
+  : path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_ROOT, 'panel-db.json');
 export const SERVERS_ROOT = path.join(DATA_ROOT, 'servers');
 

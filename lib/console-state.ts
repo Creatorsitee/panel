@@ -1,5 +1,7 @@
 import type { ServerStatus } from './types';
 
+export type ConsoleInputMode = 'auto' | 'stdin' | 'shell';
+
 export interface ConsolePowerPermissions {
   canStart: boolean;
   canRestart: boolean;
@@ -22,9 +24,32 @@ export function getConsolePowerPermissions(
     canRestart: isRunning,
     canStop: isRunning || isStarting,
     canKill: isRunning || isStarting || isStopping,
-    canSendInput: isRunning || status === 'starting',
+    canSendInput: !isStopping,
     isBusy: isStarting || isStopping,
   };
+}
+
+export function normalizeConsoleInputMode(raw: unknown): ConsoleInputMode {
+  if (raw === 'stdin' || raw === 'shell') return raw;
+  return 'auto';
+}
+
+export function getNextConsoleInputMode(current: ConsoleInputMode): ConsoleInputMode {
+  if (current === 'auto') return 'shell';
+  if (current === 'shell') return 'stdin';
+  return 'auto';
+}
+
+export function getConsoleModeLabel(mode: ConsoleInputMode): string {
+  switch (mode) {
+    case 'shell':
+      return 'Shell';
+    case 'stdin':
+      return 'Stdin';
+    case 'auto':
+    default:
+      return 'Auto';
+  }
 }
 
 export function getStatusDisplayLabel(status: ServerStatus): string {

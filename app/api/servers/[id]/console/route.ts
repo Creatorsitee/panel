@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeConsoleInputMode } from '@/lib/console-state';
 import {
   clearConsoleHistory,
   getConsoleHistory,
   getServerMetrics,
-  sendStdinToServer,
+  sendCommandToServer,
   subscribeConsole,
 } from '@/lib/process-manager';
 import { requireServerAccess } from '@/lib/route-guard';
@@ -61,7 +62,7 @@ export async function GET(
         sendRaw(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
-      sendRaw(': connected\n\n');
+      sendRaw('retry: 1000\n: connected\n\n');
       sendEvent('history', getConsoleHistory(id));
       sendEvent('metrics', getServerMetrics(id));
 
@@ -114,19 +115,24 @@ export async function POST(
   if (access.error) return access.error;
 
   try {
-    const body = (await req.json()) as { command?: string; action?: 'clear' };
+    const body = (await req.json()) as {
+      command?: string;
+      mode?: string;
+      action?: 'clear';
+    };
     if (body.action === 'clear') {
       clearConsoleHistory(id);
       return NextResponse.json({ ok: true });
     }
 
-    const command = typeof body.command === 'string' ? body.command : String(body.command ?? '');
-    if (!command.trim()) {
+    if (body.command === undefined || body.command === null) {
       return NextResponse.json({ error: 'Perintah tidak boleh kosong.' }, { status: 400 });
     }
 
-    sendStdinToServer(id, command);
-    return NextResponse.json({ ok: true });
+    const command = typeof body.command === 'string' ? body.command : String(body.command);
+    const mode = normalizeConsoleInputMode(body.mode);
+    const result = await sendCommandToServer(id, command, mode);
+    return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Gagal mengirim perintah.';
     return NextResponse.json({ error: message }, { status: 400 });

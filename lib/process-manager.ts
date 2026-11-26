@@ -5,7 +5,14 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { getServerById, listAllServers } from './db';
+import {
+  createStreamPartialState,
+  processStreamChunk,
+  sealStreamPartial,
+  type StreamPartialState,
+} from './console-stream';
 import {
   ensureServerDir,
   readServerDotEnv,
@@ -28,20 +35,29 @@ import {
   sampleNetworkRates,
   type NetworkTrafficState,
 } from './network-stats-utils';
-import { parseSafeStartupCommand } from './security';
+import {
+  assertSafeConsolePathArg,
+  parseSafeConsoleRuntimeCommand,
+  parseSafeStartupCommand,
+  resolveSafePath,
+  splitChainedConsoleCommands,
+  tokenizeConsoleCommand,
+} from './security';
+import {
+  normalizeConsoleInputMode,
+  type ConsoleInputMode,
+} from './console-state';
 import { emitWorkspaceChanged } from './realtime-bus';
 import type { ConsoleLine, HostInfo, ServerConfig, ServerRuntimeMetrics, ServerStatus } from './types';
-
-interface PartialStreamBuffer {
-  text: string;
-  timer: ReturnType<typeof setTimeout> | null;
-}
 
 interface ManagedProcess {
   serverId: string;
   status: ServerStatus;
   child: ChildProcessWithoutNullStreams | null;
   installChild: ChildProcessWithoutNullStreams | null;
+  shellChild: ChildProcessWithoutNullStreams | null;
+  shellRelDir: string;
+  stdinActive: boolean;
   pid: number | null;
   startedAtMs: number | null;
   exitCode: number | null;
@@ -50,9 +66,9 @@ interface ManagedProcess {
   netSockServer: net.Server | null;
   netSockPath: string | null;
   logs: ConsoleLine[];
-  partialBuffers: {
-    stdout: PartialStreamBuffer;
-    stderr: PartialStreamBuffer;
+  partialStates: {
+    stdout: StreamPartialState;
+    stderr: StreamPartialState;
   };
   lastCpuJiffies?: number;
   lastSampleTimeMs?: number;
@@ -100,6 +116,9 @@ function getOrCreateState(serverId: string): ManagedProcess {
       status: 'stopped',
       child: null,
       installChild: null,
+      shellChild: null,
+      shellRelDir: '',
+      stdinActive: false,
       pid: null,
       startedAtMs: null,
       exitCode: null,
@@ -108,9 +127,9 @@ function getOrCreateState(serverId: string): ManagedProcess {
       netSockServer: null,
       netSockPath: null,
       logs: [],
-      partialBuffers: {
-        stdout: { text: '', timer: null },
-        stderr: { text: '', timer: null },
+      partialStates: {
+        stdout: createStreamPartialState(),
+        stderr: createStreamPartialState(),
       },
       cpuPercent: 0,
       memoryMb: 0,
@@ -145,18 +164,127 @@ if (sockPath && !isPackageRunner) {
     let lastSentTx = -1;
     let netTimer = null;
 
-    function sendNetCounters(rx, tx) {
-      if (rx === lastSentRx && tx === lastSentTx) return;
-      lastSentRx = rx;
-      lastSentTx = tx;
+    function sendHookPayload(payload) {
       try {
         const conn = net.createConnection(sockPath, () => {
-          conn.end(JSON.stringify({ pid: process.pid, netRxBytes: rx, netTxBytes: tx }) + '\\n');
+          conn.end(JSON.stringify(payload) + '\\n');
         });
         conn.on('error', () => {});
         conn.unref();
       } catch {}
     }
+
+    function sendNetCounters(rx, tx) {
+      if (rx === lastSentRx && tx === lastSentTx) return;
+      lastSentRx = rx;
+      lastSentTx = tx;
+      sendHookPayload({ pid: process.pid, netRxBytes: rx, netTxBytes: tx });
+    }
+
+    try {
+      const fsMod = require('fs');
+      let lastSentStdinActive = false;
+      let stdinOffTimer = null;
+      let stdinResumed = false;
+      let fd0Reads = 0;
+
+      function hasStdinListeners() {
+        try {
+          return (
+            process.stdin.listenerCount('data') > 0 ||
+            process.stdin.listenerCount('readable') > 0 ||
+            process.stdin.listenerCount('keypress') > 0
+          );
+        } catch {
+          return false;
+        }
+      }
+
+      function publishStdinState(active) {
+        if (active) {
+          if (stdinOffTimer) {
+            clearTimeout(stdinOffTimer);
+            stdinOffTimer = null;
+          }
+          if (!lastSentStdinActive) {
+            lastSentStdinActive = true;
+            sendHookPayload({ pid: process.pid, stdinActive: true });
+          }
+          return;
+        }
+        if (!lastSentStdinActive || stdinOffTimer) return;
+        stdinOffTimer = setTimeout(() => {
+          stdinOffTimer = null;
+          const stillActive = hasStdinListeners() || stdinResumed || fd0Reads > 0;
+          if (!stillActive && lastSentStdinActive) {
+            lastSentStdinActive = false;
+            sendHookPayload({ pid: process.pid, stdinActive: false });
+          }
+        }, 140);
+        if (stdinOffTimer.unref) stdinOffTimer.unref();
+      }
+
+      function evaluateStdinState() {
+        publishStdinState(hasStdinListeners() || stdinResumed || fd0Reads > 0);
+      }
+
+      process.stdin.on('newListener', (ev) => {
+        if (ev === 'data' || ev === 'readable' || ev === 'keypress') {
+          publishStdinState(true);
+        }
+      });
+
+      process.stdin.on('removeListener', (ev) => {
+        if (ev === 'data' || ev === 'readable' || ev === 'keypress') {
+          evaluateStdinState();
+        }
+      });
+
+      const origResume = process.stdin.resume;
+      process.stdin.resume = function (...args) {
+        stdinResumed = true;
+        publishStdinState(true);
+        return origResume.apply(this, args);
+      };
+
+      const origPause = process.stdin.pause;
+      process.stdin.pause = function (...args) {
+        stdinResumed = false;
+        const res = origPause.apply(this, args);
+        evaluateStdinState();
+        return res;
+      };
+
+      const origReadSync = fsMod.readSync;
+      fsMod.readSync = function (fd, ...rest) {
+        if (fd === 0) {
+          fd0Reads += 1;
+          publishStdinState(true);
+          try {
+            return origReadSync.apply(this, [fd, ...rest]);
+          } finally {
+            fd0Reads = Math.max(0, fd0Reads - 1);
+            evaluateStdinState();
+          }
+        }
+        return origReadSync.apply(this, [fd, ...rest]);
+      };
+
+      const origRead = fsMod.read;
+      fsMod.read = function (fd, ...rest) {
+        if (fd === 0 && typeof rest[rest.length - 1] === 'function') {
+          const origCb = rest[rest.length - 1];
+          fd0Reads += 1;
+          publishStdinState(true);
+          rest[rest.length - 1] = function (...cbArgs) {
+            fd0Reads = Math.max(0, fd0Reads - 1);
+            evaluateStdinState();
+            return origCb.apply(this, cbArgs);
+          };
+        }
+        return origRead.apply(this, [fd, ...rest]);
+      };
+    } catch {}
 
     function flushNetSample() {
       let rx = closedRxBytes + udpRxBytes;
@@ -351,6 +479,116 @@ if _sock_path:
                 return n
 
         _stdlib_socket.socket = _CmntyTrackedSocket
+
+        try:
+            import builtins as _builtins
+            import sys as _sys
+
+            _stdin_lock = threading.Lock()
+            _stdin_depth = 0
+            _stdin_active = False
+            _stdin_off_timer = None
+
+            def _send_stdin_active(val):
+                try:
+                    c = _orig_c_socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+                    c.connect(_sock_path)
+                    c.sendall((json.dumps({"pid": os.getpid(), "stdinActive": bool(val)}) + "\\n").encode("utf-8"))
+                    c.close()
+                except Exception:
+                    pass
+
+            def _stdin_off_check():
+                global _stdin_active, _stdin_off_timer
+                with _stdin_lock:
+                    _stdin_off_timer = None
+                    if _stdin_depth == 0 and _stdin_active:
+                        _stdin_active = False
+                        _send_stdin_active(False)
+
+            def _stdin_enter():
+                global _stdin_depth, _stdin_active, _stdin_off_timer
+                should_send = False
+                with _stdin_lock:
+                    _stdin_depth += 1
+                    if _stdin_off_timer is not None:
+                        _stdin_off_timer.cancel()
+                        _stdin_off_timer = None
+                    if not _stdin_active:
+                        _stdin_active = True
+                        should_send = True
+                if should_send:
+                    _send_stdin_active(True)
+
+            def _stdin_exit():
+                global _stdin_depth, _stdin_off_timer
+                with _stdin_lock:
+                    _stdin_depth = max(0, _stdin_depth - 1)
+                    if _stdin_depth == 0 and _stdin_active and _stdin_off_timer is None:
+                        t = threading.Timer(0.15, _stdin_off_check)
+                        t.daemon = True
+                        t.start()
+                        _stdin_off_timer = t
+
+            _orig_input = _builtins.input
+            def _cmnty_input(*args, **kwargs):
+                _stdin_enter()
+                try:
+                    return _orig_input(*args, **kwargs)
+                finally:
+                    _stdin_exit()
+            _builtins.input = _cmnty_input
+
+            _orig_os_read = os.read
+            def _cmnty_os_read(fd, n):
+                if fd == 0:
+                    _stdin_enter()
+                    try:
+                        return _orig_os_read(fd, n)
+                    finally:
+                        _stdin_exit()
+                return _orig_os_read(fd, n)
+            os.read = _cmnty_os_read
+
+            _orig_stdin = _sys.stdin
+            if _orig_stdin is not None:
+                class _CmntyStdinProxy:
+                    def __init__(self, inner):
+                        self._inner = inner
+                    def read(self, *args, **kwargs):
+                        _stdin_enter()
+                        try:
+                            return self._inner.read(*args, **kwargs)
+                        finally:
+                            _stdin_exit()
+                    def readline(self, *args, **kwargs):
+                        _stdin_enter()
+                        try:
+                            return self._inner.readline(*args, **kwargs)
+                        finally:
+                            _stdin_exit()
+                    def readlines(self, *args, **kwargs):
+                        _stdin_enter()
+                        try:
+                            return self._inner.readlines(*args, **kwargs)
+                        finally:
+                            _stdin_exit()
+                    def __iter__(self):
+                        return self
+                    def __next__(self):
+                        _stdin_enter()
+                        try:
+                            line = self._inner.readline()
+                            if line == "":
+                                raise StopIteration
+                            return line
+                        finally:
+                            _stdin_exit()
+                    def __getattr__(self, name):
+                        return getattr(self._inner, name)
+                _sys.stdin = _CmntyStdinProxy(_orig_stdin)
+        except Exception:
+            pass
     except Exception:
         pass
 `;
@@ -409,7 +647,11 @@ async function setupNetMonitor(serverId: string, state: ManagedProcess): Promise
               pid?: number;
               netRxBytes?: number;
               netTxBytes?: number;
+              stdinActive?: boolean;
             };
+            if (typeof msg.stdinActive === 'boolean') {
+              state.stdinActive = msg.stdinActive;
+            }
             if (
               typeof msg.netRxBytes === 'number' ||
               typeof msg.netTxBytes === 'number'
@@ -462,6 +704,8 @@ function pushConsoleLine(
   text: string
 ): void {
   const state = getOrCreateState(serverId);
+  sealStreamPartial(state.partialStates.stdout);
+  sealStreamPartial(state.partialStates.stderr);
   const entry: ConsoleLine = {
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
@@ -480,16 +724,7 @@ function flushStreamBuffer(
   stream: 'stdout' | 'stderr'
 ): void {
   const state = getOrCreateState(serverId);
-  const buf = state.partialBuffers[stream];
-  if (buf.timer) {
-    clearTimeout(buf.timer);
-    buf.timer = null;
-  }
-  if (buf.text.length > 0) {
-    const text = buf.text;
-    buf.text = '';
-    pushConsoleLine(serverId, stream, text);
-  }
+  sealStreamPartial(state.partialStates[stream]);
 }
 
 function appendStreamChunk(
@@ -498,35 +733,18 @@ function appendStreamChunk(
   rawText: string
 ): void {
   const state = getOrCreateState(serverId);
-  const buf = state.partialBuffers[stream];
-  if (buf.timer) {
-    clearTimeout(buf.timer);
-    buf.timer = null;
-  }
-
-  let current = buf.text + rawText.replace(/\r\n/g, '\n');
-  let newlineIdx = current.indexOf('\n');
-
-  while (newlineIdx !== -1) {
-    const rawLine = current.slice(0, newlineIdx);
-    current = current.slice(newlineIdx + 1);
-    // Handle carriage return overwrites on a single line (e.g. progress bars)
-    const crParts = rawLine.split('\r');
-    const finalLine = crParts[crParts.length - 1] ?? '';
-    pushConsoleLine(serverId, stream, finalLine);
-    newlineIdx = current.indexOf('\n');
-  }
-
-  if (current.includes('\r')) {
-    const crParts = current.split('\r');
-    current = crParts[crParts.length - 1] ?? '';
-  }
-
-  buf.text = current;
-  if (buf.text.length > 0) {
-    buf.timer = setTimeout(() => {
-      flushStreamBuffer(serverId, stream);
-    }, 45);
+  const emitted = processStreamChunk({
+    logs: state.logs,
+    partial: state.partialStates[stream],
+    stream,
+    rawText,
+    maxLines: MAX_LOG_LINES,
+    createId: () => crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+  });
+  const emitter = getEmitter();
+  for (const entry of emitted) {
+    emitter.emit(`log:${serverId}`, entry);
   }
 }
 
@@ -759,16 +977,8 @@ export function getConsoleHistory(serverId: string): ConsoleLine[] {
 
 export function clearConsoleHistory(serverId: string): void {
   const state = getOrCreateState(serverId);
-  if (state.partialBuffers.stdout.timer) {
-    clearTimeout(state.partialBuffers.stdout.timer);
-    state.partialBuffers.stdout.timer = null;
-  }
-  if (state.partialBuffers.stderr.timer) {
-    clearTimeout(state.partialBuffers.stderr.timer);
-    state.partialBuffers.stderr.timer = null;
-  }
-  state.partialBuffers.stdout.text = '';
-  state.partialBuffers.stderr.text = '';
+  sealStreamPartial(state.partialStates.stdout);
+  sealStreamPartial(state.partialStates.stderr);
   state.logs = [];
   getEmitter().emit(`clear:${serverId}`);
 }
@@ -847,7 +1057,9 @@ function buildSafeEnv(
     PATH: combinedPath,
     HOME: cwd,
     LANG: process.env.LANG || 'C.UTF-8',
+    TERM: 'xterm-256color',
     PYTHONUNBUFFERED: '1',
+    PYTHONIOENCODING: 'utf-8',
     NODE_ENV: diskEnv.NODE_ENV || 'production',
     PORT: String(server.port),
     ...diskEnv,
@@ -903,9 +1115,22 @@ function runProcessCommand(
       // ignore EPIPE if process exits mid-write
     });
 
-    child.stdout.on('data', (chunk: Buffer) => appendLog(serverId, 'stdout', chunk.toString('utf8')));
-    child.stderr.on('data', (chunk: Buffer) => appendLog(serverId, 'stderr', chunk.toString('utf8')));
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      const text = stdoutDecoder.write(chunk);
+      if (text) appendLog(serverId, 'stdout', text);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = stderrDecoder.write(chunk);
+      if (text) appendLog(serverId, 'stderr', text);
+    });
     child.on('error', (err) => {
+      const remOut = stdoutDecoder.end();
+      if (remOut) appendLog(serverId, 'stdout', remOut);
+      const remErr = stderrDecoder.end();
+      if (remErr) appendLog(serverId, 'stderr', remErr);
       flushStreamBuffer(serverId, 'stdout');
       flushStreamBuffer(serverId, 'stderr');
       if (state.installChild === child) {
@@ -915,6 +1140,10 @@ function runProcessCommand(
       reject(new Error(`Failed to execute ${executable}: ${err.message}`));
     });
     child.on('close', (code) => {
+      const remOut = stdoutDecoder.end();
+      if (remOut) appendLog(serverId, 'stdout', remOut);
+      const remErr = stderrDecoder.end();
+      if (remErr) appendLog(serverId, 'stderr', remErr);
       flushStreamBuffer(serverId, 'stdout');
       flushStreamBuffer(serverId, 'stderr');
       if (state.installChild === child) {
@@ -1217,6 +1446,7 @@ async function launchServerProcess(
   });
 
   state.child = child;
+  state.stdinActive = false;
   state.pid = child.pid ?? null;
   state.startedAtMs = Date.now();
   state.status = 'running';
@@ -1227,21 +1457,31 @@ async function launchServerProcess(
     // ignore EPIPE if process exits mid-write
   });
 
+  const stdoutDecoder = new StringDecoder('utf8');
+  const stderrDecoder = new StringDecoder('utf8');
+
   child.stdout.on('data', (chunk: Buffer) => {
-    appendLog(serverId, 'stdout', chunk.toString('utf8'));
+    const text = stdoutDecoder.write(chunk);
+    if (text) appendLog(serverId, 'stdout', text);
   });
 
   child.stderr.on('data', (chunk: Buffer) => {
-    appendLog(serverId, 'stderr', chunk.toString('utf8'));
+    const text = stderrDecoder.write(chunk);
+    if (text) appendLog(serverId, 'stderr', text);
   });
 
   child.on('error', (err) => {
+    const remOut = stdoutDecoder.end();
+    if (remOut) appendLog(serverId, 'stdout', remOut);
+    const remErr = stderrDecoder.end();
+    if (remErr) appendLog(serverId, 'stderr', remErr);
     flushStreamBuffer(serverId, 'stdout');
     flushStreamBuffer(serverId, 'stderr');
     cleanupNetMonitor(state);
     appendLog(serverId, 'system', `Failed to start container process: ${err.message}`);
     state.status = 'error';
     state.child = null;
+    state.stdinActive = false;
     state.pid = null;
     state.startedAtMs = null;
     state.cpuPercent = 0;
@@ -1252,10 +1492,15 @@ async function launchServerProcess(
   });
 
   child.on('close', (code) => {
+    const remOut = stdoutDecoder.end();
+    if (remOut) appendLog(serverId, 'stdout', remOut);
+    const remErr = stderrDecoder.end();
+    if (remErr) appendLog(serverId, 'stderr', remErr);
     flushStreamBuffer(serverId, 'stdout');
     flushStreamBuffer(serverId, 'stderr');
     cleanupNetMonitor(state);
     state.child = null;
+    state.stdinActive = false;
     state.pid = null;
     state.exitCode = code;
     state.cpuPercent = 0;
@@ -1382,6 +1627,19 @@ export async function startServerProcess(serverId: string): Promise<ServerRuntim
 
 export async function stopServerProcess(serverId: string, forceKill = false): Promise<ServerRuntimeMetrics> {
   const state = getOrCreateState(serverId);
+  if (state.shellChild) {
+    try {
+      killProcessTree(state.shellChild, forceKill ? 'SIGKILL' : 'SIGTERM');
+    } catch {
+      // ignore already exited
+    }
+    if (!state.child && !state.installChild) {
+      appendLog(serverId, 'system', 'Perintah container shell dihentikan.');
+      state.shellChild = null;
+      return getServerMetrics(serverId);
+    }
+  }
+
   if (state.installChild) {
     state.manualStop = true;
     state.status = 'stopping';
@@ -1437,6 +1695,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
 
   if (!state.child || !state.pid) {
     state.manualStop = true;
+    state.stdinActive = false;
     state.status = 'stopped';
     state.pid = null;
     state.startedAtMs = null;
@@ -1490,6 +1749,7 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
   cleanupNetMonitor(state);
   if (state.child === child || state.status === 'stopping') {
     state.child = null;
+    state.stdinActive = false;
     state.pid = null;
     state.startedAtMs = null;
     state.cpuPercent = 0;
@@ -1504,22 +1764,736 @@ export async function stopServerProcess(serverId: string, forceKill = false): Pr
 
 export async function restartServerProcess(serverId: string): Promise<ServerRuntimeMetrics> {
   const state = getOrCreateState(serverId);
-  if (state.child || state.installChild) {
+  if (state.child || state.installChild || state.shellChild) {
     await stopServerProcess(serverId, false);
   }
   return startServerProcess(serverId);
 }
 
-export function sendStdinToServer(serverId: string, input: string): void {
-  const state = getOrCreateState(serverId);
-  const targetChild =
-    state.status === 'running' || state.status === 'starting' ? state.child : null;
-
-  if (!targetChild || !targetChild.stdin || targetChild.stdin.destroyed || !targetChild.stdin.writable) {
-    throw new Error('Server is offline. Start the server first before sending commands.');
+function assertConsoleTargetRealContainment(baseDir: string, targetPath: string): void {
+  const realBase = fs.realpathSync(baseDir);
+  if (fs.existsSync(targetPath)) {
+    const realTarget = fs.realpathSync(targetPath);
+    if (realTarget !== realBase && !realTarget.startsWith(realBase + path.sep)) {
+      throw new Error('Akses symlink ke luar direktori container ditolak.');
+    }
+    return;
   }
-  appendLog(serverId, 'stdin', `> ${input}`);
-  targetChild.stdin.write(`${input}\n`);
+  let probe = path.dirname(targetPath);
+  while (probe && probe.length >= baseDir.length) {
+    if (fs.existsSync(probe)) {
+      const realProbe = fs.realpathSync(probe);
+      if (realProbe !== realBase && !realProbe.startsWith(realBase + path.sep)) {
+        throw new Error('Path berada di luar direktori container.');
+      }
+      break;
+    }
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+}
+
+function resolveContainerArgPath(baseDir: string, currentRelDir: string, rawArg: string): string {
+  assertSafeConsolePathArg(rawArg);
+  let relInput = rawArg;
+  if (relInput === '/home/container') {
+    relInput = '';
+  } else if (relInput.startsWith('/home/container/')) {
+    relInput = relInput.slice('/home/container/'.length);
+  } else if (currentRelDir) {
+    relInput = path.posix.join(currentRelDir.replace(/\\/g, '/'), relInput);
+  }
+  const target = resolveSafePath(baseDir, relInput);
+  assertConsoleTargetRealContainment(baseDir, target);
+  return target;
+}
+
+function getShellWorkingDir(baseDir: string, state: ManagedProcess): string {
+  if (!state.shellRelDir) return baseDir;
+  try {
+    const dir = resolveSafePath(baseDir, state.shellRelDir);
+    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+      assertConsoleTargetRealContainment(baseDir, dir);
+      return dir;
+    }
+  } catch {
+    // reset invalid working dir back to container root
+  }
+  state.shellRelDir = '';
+  return baseDir;
+}
+
+function formatByteSizeCompact(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+}
+
+function spawnShellRuntimeCommand(
+  serverId: string,
+  state: ManagedProcess,
+  cwd: string,
+  workDir: string,
+  executable: string,
+  args: string[],
+  isMutating: boolean
+): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: workDir,
+      env: buildSafeEnv(serverId),
+      shell: false,
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    state.shellChild = child;
+    child.stdin.on('error', () => {
+      // ignore EPIPE
+    });
+
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      const text = stdoutDecoder.write(chunk);
+      if (text) appendLog(serverId, 'stdout', text);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = stderrDecoder.write(chunk);
+      if (text) appendLog(serverId, 'stderr', text);
+    });
+    child.on('error', (err) => {
+      const remOut = stdoutDecoder.end();
+      if (remOut) appendLog(serverId, 'stdout', remOut);
+      const remErr = stderrDecoder.end();
+      if (remErr) appendLog(serverId, 'stderr', remErr);
+      flushStreamBuffer(serverId, 'stdout');
+      flushStreamBuffer(serverId, 'stderr');
+      if (state.shellChild === child) {
+        state.shellChild = null;
+      }
+      reject(new Error(`Gagal menjalankan ${executable}: ${err.message}`));
+    });
+    child.on('close', (code) => {
+      const remOut = stdoutDecoder.end();
+      if (remOut) appendLog(serverId, 'stdout', remOut);
+      const remErr = stderrDecoder.end();
+      if (remErr) appendLog(serverId, 'stderr', remErr);
+      flushStreamBuffer(serverId, 'stdout');
+      flushStreamBuffer(serverId, 'stderr');
+      if (state.shellChild === child) {
+        state.shellChild = null;
+      }
+      if (isMutating) {
+        emitWorkspaceChanged(`files:${serverId}`);
+      }
+      resolve(code ?? 1);
+    });
+  });
+}
+
+function resolveConsolePipInvocation(
+  cwd: string,
+  requestedExec: string,
+  rawArgs: string[]
+): { executable: string; args: string[] } {
+  const venvPip = path.join(cwd, '.venv', 'bin', 'pip');
+  if (fs.existsSync(venvPip)) {
+    return { executable: venvPip, args: rawArgs };
+  }
+
+  const subcommand = rawArgs[0] || '';
+  const hasTargetFlag = rawArgs.some((a) => a === '-t' || a === '--target' || a.startsWith('--target='));
+  const hasPip3 = hasCommandOnSystem('pip3', ['--version']);
+  const hasPyPip = hasCommandOnSystem('python3', ['-m', 'pip', '--version']);
+
+  const extraArgs =
+    subcommand === 'install' && !hasTargetFlag && !fs.existsSync(venvPip)
+      ? ['--no-cache-dir', '--target', '.py_packages', ...rawArgs.slice(1)]
+      : rawArgs.slice(1);
+
+  if (hasPip3) {
+    return {
+      executable: 'pip3',
+      args: subcommand ? [subcommand, ...extraArgs] : rawArgs,
+    };
+  }
+  if (hasPyPip) {
+    return {
+      executable: 'python3',
+      args: ['-m', 'pip', ...(subcommand ? [subcommand, ...extraArgs] : rawArgs)],
+    };
+  }
+  throw new Error(
+    `${requestedExec} tidak tersedia di sistem host (pip3 / python3-venv tidak ditemukan).`
+  );
+}
+
+async function executeConsoleShellSegment(
+  server: ServerConfig,
+  state: ManagedProcess,
+  cwd: string,
+  segment: string
+): Promise<number> {
+  const tokens = tokenizeConsoleCommand(segment);
+  if (tokens.length === 0) return 0;
+
+  const cmd = tokens[0];
+  const args = tokens.slice(1);
+  const workDir = getShellWorkingDir(cwd, state);
+  const virtualPwd = state.shellRelDir ? `/home/container/${state.shellRelDir}` : '/home/container';
+
+  switch (cmd) {
+    case 'clear':
+    case 'cls': {
+      clearConsoleHistory(server.id);
+      return 0;
+    }
+    case 'help': {
+      appendLog(
+        server.id,
+        'stdout',
+        [
+          'Perintah Container & Panel:',
+          '  Power      : start | stop | restart | kill | clear',
+          '  Navigasi   : pwd | ls [-la] [dir] | cd [dir]',
+          '  Berkas     : cat <file> | head [-n N] <file> | tail [-n N] <file>',
+          '  Kelola     : mkdir [-p] <dir> | touch <file> | rm [-rf] <path> | mv <src> <dst> | cp [-r] <src> <dst>',
+          '  Runtime    : npm <cmd> | npx <cmd> | node <args> | python3 <args> | pip <cmd>',
+          '  Tips       : Gunakan awalan "!<cmd>" atau mode Shell untuk menjalankan perintah saat proses meminta stdin.',
+          '',
+        ].join('\n')
+      );
+      return 0;
+    }
+    case 'start': {
+      if (state.status === 'running' || state.status === 'starting' || state.status === 'installing') {
+        appendLog(server.id, 'system', `Server sudah dalam status ${state.status}.`);
+        return 0;
+      }
+      await startServerProcess(server.id);
+      return 0;
+    }
+    case 'stop': {
+      if (state.shellChild) {
+        killProcessTree(state.shellChild, 'SIGTERM');
+        return 0;
+      }
+      if (state.status === 'stopped' || state.status === 'error') {
+        appendLog(server.id, 'system', 'Server sudah dalam status offline.');
+        return 0;
+      }
+      await stopServerProcess(server.id, false);
+      return 0;
+    }
+    case 'restart': {
+      await restartServerProcess(server.id);
+      return 0;
+    }
+    case 'kill': {
+      if (state.shellChild) {
+        killProcessTree(state.shellChild, 'SIGKILL');
+        return 0;
+      }
+      await stopServerProcess(server.id, true);
+      return 0;
+    }
+    case 'pwd': {
+      appendLog(server.id, 'stdout', `${virtualPwd}\n`);
+      return 0;
+    }
+    case 'whoami': {
+      appendLog(server.id, 'stdout', 'container\n');
+      return 0;
+    }
+    case 'uname': {
+      appendLog(server.id, 'stdout', `${os.type()} container ${os.release()} ${os.arch()}\n`);
+      return 0;
+    }
+    case 'echo': {
+      appendLog(server.id, 'stdout', `${args.join(' ')}\n`);
+      return 0;
+    }
+    case 'env': {
+      const safeEnv = buildSafeEnv(server.id);
+      const hiddenKeys = new Set(['PATH', 'CMNTY_NET_SOCK', 'NODE_OPTIONS', 'PYTHONPATH']);
+      const lines = Object.entries(safeEnv)
+        .filter(([key, val]) => val !== undefined && !hiddenKeys.has(key))
+        .map(([key, val]) => `${key}=${key === 'HOME' ? '/home/container' : val}`);
+      appendLog(server.id, 'stdout', `${lines.join('\n')}\n`);
+      return 0;
+    }
+    case 'which': {
+      if (args.length === 0) {
+        appendLog(server.id, 'stderr', 'which: sertakan nama perintah (mis. which node)\n');
+        return 1;
+      }
+      for (const binName of args) {
+        if (binName.includes('/') || binName.includes('\\')) {
+          appendLog(server.id, 'stderr', `which: nama binary tidak valid: ${binName}\n`);
+          return 1;
+        }
+        const safeExec = path.basename(binName);
+        if (hasCommandOnSystem('which', [safeExec])) {
+          const found = spawnSync('which', [safeExec], { encoding: 'utf8', shell: false });
+          appendLog(server.id, 'stdout', `${(found.stdout || '').trim() || safeExec}\n`);
+        } else {
+          appendLog(server.id, 'stderr', `${safeExec} not found\n`);
+        }
+      }
+      return 0;
+    }
+    case 'cd': {
+      const targetArg = args[0] || '~';
+      if (targetArg === '~' || targetArg === '/home/container') {
+        state.shellRelDir = '';
+        return 0;
+      }
+      if (targetArg === '-') {
+        return 0;
+      }
+      let nextTarget: string;
+      if (targetArg === '..' || targetArg.startsWith('../') || targetArg.includes('/../') || targetArg.endsWith('/..')) {
+        const joined = path.posix.normalize(
+          path.posix.join('/', state.shellRelDir.replace(/\\/g, '/'), targetArg)
+        );
+        const rel = joined.replace(/^\/+/, '');
+        nextTarget = resolveSafePath(cwd, rel);
+        assertConsoleTargetRealContainment(cwd, nextTarget);
+      } else {
+        nextTarget = resolveContainerArgPath(cwd, state.shellRelDir, targetArg);
+      }
+      if (!fs.existsSync(nextTarget)) {
+        appendLog(server.id, 'stderr', `cd: ${targetArg}: No such file or directory\n`);
+        return 1;
+      }
+      if (!fs.statSync(nextTarget).isDirectory()) {
+        appendLog(server.id, 'stderr', `cd: ${targetArg}: Not a directory\n`);
+        return 1;
+      }
+      const nextRel = path.relative(cwd, nextTarget).replace(/\\/g, '/');
+      state.shellRelDir = nextRel === '.' ? '' : nextRel;
+      return 0;
+    }
+    case 'ls':
+    case 'll':
+    case 'dir': {
+      let showAll = cmd === 'll';
+      let longFormat = cmd === 'll';
+      let targetArg = '';
+      for (const a of args) {
+        if (a.startsWith('-')) {
+          if (a.includes('a') || a.includes('A')) showAll = true;
+          if (a.includes('l')) longFormat = true;
+        } else if (!targetArg) {
+          targetArg = a;
+        }
+      }
+      const targetPath = targetArg
+        ? resolveContainerArgPath(cwd, state.shellRelDir, targetArg)
+        : workDir;
+      if (!fs.existsSync(targetPath)) {
+        appendLog(server.id, 'stderr', `${cmd}: cannot access '${targetArg}': No such file or directory\n`);
+        return 1;
+      }
+      const st = fs.statSync(targetPath);
+      if (!st.isDirectory()) {
+        appendLog(
+          server.id,
+          'stdout',
+          longFormat
+            ? `-rw-r--r--  ${formatByteSizeCompact(st.size).padStart(7)}  ${path.basename(targetPath)}\n`
+            : `${path.basename(targetPath)}\n`
+        );
+        return 0;
+      }
+      const entries = fs
+        .readdirSync(targetPath, { withFileTypes: true })
+        .filter((e) => showAll || !e.name.startsWith('.'))
+        .sort((a, b) => {
+          if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      if (entries.length === 0) {
+        appendLog(server.id, 'stdout', '(empty directory)\n');
+        return 0;
+      }
+      if (longFormat) {
+        const rows = entries.map((entry) => {
+          let sizeLabel = '-';
+          try {
+            const est = fs.statSync(path.join(targetPath, entry.name));
+            sizeLabel = entry.isDirectory() ? 'dir' : formatByteSizeCompact(est.size);
+          } catch {
+            sizeLabel = '-';
+          }
+          const prefix = entry.isDirectory() ? 'drwxr-xr-x' : '-rw-r--r--';
+          const suffix = entry.isDirectory() ? '/' : '';
+          return `${prefix}  ${sizeLabel.padStart(7)}  ${entry.name}${suffix}`;
+        });
+        appendLog(server.id, 'stdout', `${rows.join('\n')}\n`);
+      } else {
+        const names = entries.map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
+        appendLog(server.id, 'stdout', `${names.join('  ')}\n`);
+      }
+      return 0;
+    }
+    case 'cat':
+    case 'head':
+    case 'tail': {
+      let lineLimit = cmd === 'cat' ? Infinity : 20;
+      const fileArgs: string[] = [];
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if ((cmd === 'head' || cmd === 'tail') && a === '-n' && args[i + 1]) {
+          const parsedN = Number(args[i + 1]);
+          if (Number.isInteger(parsedN) && parsedN > 0) {
+            lineLimit = Math.min(500, parsedN);
+          }
+          i += 1;
+        } else if ((cmd === 'head' || cmd === 'tail') && /^-\d+$/.test(a)) {
+          lineLimit = Math.min(500, Math.max(1, Number(a.slice(1))));
+        } else if (!a.startsWith('-')) {
+          fileArgs.push(a);
+        }
+      }
+      if (fileArgs.length === 0) {
+        appendLog(server.id, 'stderr', `${cmd}: sertakan nama file (mis. ${cmd} package.json)\n`);
+        return 1;
+      }
+      for (const fArg of fileArgs) {
+        const target = resolveContainerArgPath(cwd, state.shellRelDir, fArg);
+        if (!fs.existsSync(target)) {
+          appendLog(server.id, 'stderr', `${cmd}: ${fArg}: No such file or directory\n`);
+          return 1;
+        }
+        const stat = fs.statSync(target);
+        if (stat.isDirectory()) {
+          appendLog(server.id, 'stderr', `${cmd}: ${fArg}: Is a directory\n`);
+          return 1;
+        }
+        const maxBytes = 256 * 1024;
+        const fd = fs.openSync(target, 'r');
+        let content = '';
+        try {
+          const readLen = Math.min(stat.size, maxBytes);
+          const buf = Buffer.alloc(readLen);
+          fs.readSync(fd, buf, 0, readLen, 0);
+          if (buf.includes(0)) {
+            appendLog(server.id, 'stderr', `${cmd}: ${fArg}: File biner tidak dapat ditampilkan\n`);
+            return 1;
+          }
+          content = buf.toString('utf8');
+        } finally {
+          fs.closeSync(fd);
+        }
+        if (cmd === 'head' || cmd === 'tail') {
+          const split = content.replace(/\r\n/g, '\n').split('\n');
+          const sliced = cmd === 'head' ? split.slice(0, lineLimit) : split.slice(-lineLimit);
+          content = sliced.join('\n');
+        }
+        appendLog(server.id, 'stdout', content.endsWith('\n') ? content : `${content}\n`);
+        if (stat.size > maxBytes && cmd === 'cat') {
+          appendLog(server.id, 'system', `Output dipotong pada 256 KiB (ukuran total ${formatByteSizeCompact(stat.size)}).`);
+        }
+      }
+      return 0;
+    }
+    case 'mkdir': {
+      const dirs = args.filter((a) => !a.startsWith('-'));
+      if (dirs.length === 0) {
+        appendLog(server.id, 'stderr', 'mkdir: sertakan nama direktori\n');
+        return 1;
+      }
+      for (const dirArg of dirs) {
+        const target = resolveContainerArgPath(cwd, state.shellRelDir, dirArg);
+        fs.mkdirSync(target, { recursive: true });
+      }
+      emitWorkspaceChanged(`files:${server.id}`);
+      return 0;
+    }
+    case 'touch': {
+      const files = args.filter((a) => !a.startsWith('-'));
+      if (files.length === 0) {
+        appendLog(server.id, 'stderr', 'touch: sertakan nama file\n');
+        return 1;
+      }
+      const now = new Date();
+      for (const fileArg of files) {
+        const target = resolveContainerArgPath(cwd, state.shellRelDir, fileArg);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        if (fs.existsSync(target)) {
+          fs.utimesSync(target, now, now);
+        } else {
+          fs.writeFileSync(target, '', 'utf8');
+        }
+      }
+      emitWorkspaceChanged(`files:${server.id}`);
+      return 0;
+    }
+    case 'rm': {
+      let recursive = false;
+      let force = false;
+      const targets: string[] = [];
+      for (const a of args) {
+        if (a.startsWith('-')) {
+          if (a.includes('r') || a.includes('R')) recursive = true;
+          if (a.includes('f')) force = true;
+        } else {
+          targets.push(a);
+        }
+      }
+      if (targets.length === 0) {
+        appendLog(server.id, 'stderr', 'rm: sertakan path yang akan dihapus\n');
+        return 1;
+      }
+      for (const tArg of targets) {
+        const target = resolveContainerArgPath(cwd, state.shellRelDir, tArg);
+        if (target === path.resolve(cwd)) {
+          appendLog(server.id, 'stderr', 'rm: tidak boleh menghapus direktori root container\n');
+          return 1;
+        }
+        if (!fs.existsSync(target)) {
+          if (!force) {
+            appendLog(server.id, 'stderr', `rm: cannot remove '${tArg}': No such file or directory\n`);
+            return 1;
+          }
+          continue;
+        }
+        const st = fs.lstatSync(target);
+        if (st.isDirectory() && !recursive) {
+          appendLog(server.id, 'stderr', `rm: cannot remove '${tArg}': Is a directory (gunakan rm -rf)\n`);
+          return 1;
+        }
+        fs.rmSync(target, { recursive, force });
+      }
+      emitWorkspaceChanged(`files:${server.id}`);
+      return 0;
+    }
+    case 'mv':
+    case 'cp': {
+      const recursive = args.some((a) => a.startsWith('-') && (a.includes('r') || a.includes('R')));
+      const positional = args.filter((a) => !a.startsWith('-'));
+      if (positional.length !== 2) {
+        appendLog(server.id, 'stderr', `${cmd}: gunakan "${cmd} <sumber> <tujuan>"\n`);
+        return 1;
+      }
+      const src = resolveContainerArgPath(cwd, state.shellRelDir, positional[0]);
+      let dst = resolveContainerArgPath(cwd, state.shellRelDir, positional[1]);
+      if (!fs.existsSync(src)) {
+        appendLog(server.id, 'stderr', `${cmd}: cannot stat '${positional[0]}': No such file or directory\n`);
+        return 1;
+      }
+      if (src === path.resolve(cwd)) {
+        appendLog(server.id, 'stderr', `${cmd}: tidak dapat memindahkan root container\n`);
+        return 1;
+      }
+      if (fs.existsSync(dst) && fs.statSync(dst).isDirectory()) {
+        dst = path.join(dst, path.basename(src));
+        assertConsoleTargetRealContainment(cwd, dst);
+      }
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      if (cmd === 'mv') {
+        fs.renameSync(src, dst);
+      } else {
+        const srcStat = fs.statSync(src);
+        if (srcStat.isDirectory() && !recursive) {
+          appendLog(server.id, 'stderr', `cp: -r not specified; omitting directory '${positional[0]}'\n`);
+          return 1;
+        }
+        fs.cpSync(src, dst, { recursive });
+      }
+      emitWorkspaceChanged(`files:${server.id}`);
+      return 0;
+    }
+    default: {
+      const parsed = parseSafeConsoleRuntimeCommand(tokens);
+      if (!parsed) {
+        appendLog(
+          server.id,
+          'stderr',
+          `sh: ${cmd}: command not found (ketik "help" untuk daftar perintah)\n`
+        );
+        return 127;
+      }
+
+      if (parsed.kind === 'pip') {
+        const resolvedPip = resolveConsolePipInvocation(
+          cwd,
+          parsed.executable,
+          parsed.executable === 'python' || parsed.executable === 'python3'
+            ? parsed.args.slice(parsed.args.indexOf('-m') + 2)
+            : parsed.args
+        );
+        return spawnShellRuntimeCommand(
+          server.id,
+          state,
+          cwd,
+          workDir,
+          resolvedPip.executable,
+          resolvedPip.args,
+          parsed.isMutating
+        );
+      }
+
+      const execPath =
+        parsed.kind === 'python'
+          ? resolvePythonExecutable(cwd, parsed.executable)
+          : resolveNodeExecutable(cwd, parsed.executable);
+
+      return spawnShellRuntimeCommand(
+        server.id,
+        state,
+        cwd,
+        workDir,
+        execPath,
+        parsed.args,
+        parsed.isMutating
+      );
+    }
+  }
+}
+
+function startConsoleShellChain(
+  server: ServerConfig,
+  state: ManagedProcess,
+  rawShellCommand: string
+): Promise<void> {
+  if (state.shellChild) {
+    throw new Error('Perintah shell sebelumnya masih berjalan. Tunggu selesai atau gunakan "stop"/"kill".');
+  }
+  const cwd = ensureServerDir(server.id);
+  const segments = splitChainedConsoleCommands(rawShellCommand);
+  if (segments.length === 0) return Promise.resolve();
+
+  // Pre-validate syntax & paths synchronously before returning HTTP 200
+  for (const seg of segments) {
+    const tokens = tokenizeConsoleCommand(seg);
+    if (tokens.length > 0) {
+      parseSafeConsoleRuntimeCommand(tokens);
+    }
+  }
+
+  const promptPrefix = state.shellRelDir ? `container@cmnty:${state.shellRelDir}~` : 'container@cmnty~';
+  appendLog(server.id, 'system', `${promptPrefix} ${rawShellCommand.trim()}`);
+
+  const runPromise = (async () => {
+    for (const seg of segments) {
+      try {
+        const code = await executeConsoleShellSegment(server, state, cwd, seg);
+        if (code !== 0) {
+          break;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Gagal menjalankan perintah console.';
+        appendLog(server.id, 'stderr', `${msg}\n`);
+        break;
+      }
+    }
+  })();
+
+  return runPromise;
+}
+
+export async function sendCommandToServer(
+  serverId: string,
+  input: string,
+  rawMode: ConsoleInputMode = 'auto'
+): Promise<{ routed: 'stdin' | 'shell' | 'control' }> {
+  const server = getServerById(serverId);
+  if (!server) {
+    throw new Error('Server tidak ditemukan.');
+  }
+
+  const state = getOrCreateState(serverId);
+  if (state.status === 'stopping') {
+    throw new Error('Server sedang berhenti. Tunggu beberapa detik sebelum mengirim perintah.');
+  }
+
+  const mode = normalizeConsoleInputMode(rawMode);
+  const trimmed = input.trim();
+
+  if (mode === 'stdin') {
+    const targetChild =
+      state.status === 'installing'
+        ? state.installChild
+        : state.shellChild ??
+          (state.status === 'running' || state.status === 'starting' ? state.child : null);
+
+    if (!targetChild || !targetChild.stdin || targetChild.stdin.destroyed || !targetChild.stdin.writable) {
+      throw new Error(
+        'Tidak ada proses aktif untuk menerima stdin. Ubah mode ke Auto/Shell atau klik Start.'
+      );
+    }
+    appendLog(serverId, 'stdin', `> ${input}`);
+    targetChild.stdin.write(`${input}\n`);
+    return { routed: 'stdin' };
+  }
+
+  if (mode === 'shell') {
+    if (!trimmed) {
+      return { routed: 'control' };
+    }
+    const cleanCmd = trimmed.startsWith('!') ? trimmed.slice(1).trim() : trimmed;
+    if (!cleanCmd) return { routed: 'control' };
+    const promise = startConsoleShellChain(server, state, cleanCmd);
+    // Allow fast sync/lifecycle commands (`ls`, `clear`, `start`, `stop`, `restart`) to finish cleanly
+    await Promise.race([promise, new Promise<void>((r) => setTimeout(r, 80))]);
+    return { routed: 'shell' };
+  }
+
+  // Mode 'auto'
+  if (trimmed.startsWith('!')) {
+    const cleanCmd = trimmed.slice(1).trim();
+    if (!cleanCmd) return { routed: 'control' };
+    const promise = startConsoleShellChain(server, state, cleanCmd);
+    await Promise.race([promise, new Promise<void>((r) => setTimeout(r, 80))]);
+    return { routed: 'shell' };
+  }
+
+  if (state.shellChild && state.shellChild.stdin && !state.shellChild.stdin.destroyed && state.shellChild.stdin.writable) {
+    appendLog(serverId, 'stdin', `> ${input}`);
+    state.shellChild.stdin.write(`${input}\n`);
+    return { routed: 'stdin' };
+  }
+
+  if (
+    state.status === 'installing' &&
+    state.installChild &&
+    state.installChild.stdin &&
+    !state.installChild.stdin.destroyed &&
+    state.installChild.stdin.writable
+  ) {
+    appendLog(serverId, 'stdin', `> ${input}`);
+    state.installChild.stdin.write(`${input}\n`);
+    return { routed: 'stdin' };
+  }
+
+  if (
+    (state.status === 'running' || state.status === 'starting') &&
+    state.child &&
+    state.child.stdin &&
+    !state.child.stdin.destroyed &&
+    state.child.stdin.writable &&
+    (state.stdinActive || input === '')
+  ) {
+    appendLog(serverId, 'stdin', `> ${input}`);
+    state.child.stdin.write(`${input}\n`);
+    return { routed: 'stdin' };
+  }
+
+  if (!trimmed) {
+    return { routed: 'control' };
+  }
+
+  const promise = startConsoleShellChain(server, state, trimmed);
+  await Promise.race([promise, new Promise<void>((r) => setTimeout(r, 80))]);
+  return { routed: 'shell' };
+}
+
+export async function sendStdinToServer(serverId: string, input: string): Promise<void> {
+  await sendCommandToServer(serverId, input, 'auto');
 }
 
 function getSystemVersions(): {
@@ -1904,4 +2878,28 @@ export function getHostInfo(): HostInfo {
     activeServersCount: quotaSummary.activeServersCount,
     totalServersCount: quotaSummary.totalServersCount,
   };
+}
+
+const globalForShutdown = globalThis as unknown as {
+  __nodalExitCleanupRegistered?: boolean;
+};
+
+if (!globalForShutdown.__nodalExitCleanupRegistered && typeof process !== 'undefined') {
+  globalForShutdown.__nodalExitCleanupRegistered = true;
+  process.once('exit', () => {
+    const map = globalForPm.__nodalProcesses;
+    if (!map) return;
+    for (const state of map.values()) {
+      if (state.shellChild) {
+        killProcessTree(state.shellChild, 'SIGTERM');
+      }
+      if (state.installChild) {
+        killProcessTree(state.installChild, 'SIGTERM');
+      }
+      if (state.child) {
+        killProcessTree(state.child, 'SIGTERM');
+      }
+      cleanupNetMonitor(state);
+    }
+  });
 }

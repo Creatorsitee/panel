@@ -93,6 +93,7 @@ function xterm256ToHex(index: number): string {
 
 // Strips non-SGR CSI/OSC escape sequences (cursor moves, line clear, window title, etc.)
 const NON_SGR_ESCAPE_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]/g;
+const TRAILING_INCOMPLETE_ESCAPE_RE = /\x1b(?:\[[0-9;:?]*|\][^\x07\x1b]*)?$/;
 const SGR_RE = /\x1b\[([0-9;:]*)m/g;
 
 function normalizeCarriageReturns(raw: string): string {
@@ -136,7 +137,9 @@ function buildAnsiInlineStyle(style: AnsiStyle): CSSProperties | undefined {
 
 function splitAnsiSegments(raw: string): Array<{ text: string; style: AnsiStyle }> {
   const normalized = normalizeCarriageReturns(raw);
-  const cleaned = normalized.replace(NON_SGR_ESCAPE_RE, '');
+  const cleaned = normalized
+    .replace(NON_SGR_ESCAPE_RE, '')
+    .replace(TRAILING_INCOMPLETE_ESCAPE_RE, '');
   const segments: Array<{ text: string; style: AnsiStyle }> = [];
 
   const style: AnsiStyle = {

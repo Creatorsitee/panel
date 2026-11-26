@@ -47,35 +47,62 @@ export default function ServerSettingsTab({
     cpuLimitPercent: server.cpuLimitPercent,
   });
 
+  const localInputsRef = useRef({
+    name,
+    description,
+    startupCommand,
+    autoRestart,
+    portInput,
+    memoryLimitMb,
+    cpuLimitPercent,
+  });
+  useEffect(() => {
+    localInputsRef.current = {
+      name,
+      description,
+      startupCommand,
+      autoRestart,
+      portInput,
+      memoryLimitMb,
+      cpuLimitPercent,
+    };
+  }, [name, description, startupCommand, autoRestart, portInput, memoryLimitMb, cpuLimitPercent]);
+
   useEffect(() => {
     const saved = lastSavedRef.current;
-    const hasLocalEdits =
-      name.trim() !== saved.name ||
-      description !== saved.description ||
-      startupCommand.trim() !== saved.startupCommand ||
-      autoRestart !== saved.autoRestart ||
-      Number(portInput.trim() || server.port) !== saved.port ||
-      memoryLimitMb !== saved.memoryLimitMb ||
-      cpuLimitPercent !== saved.cpuLimitPercent;
+    const local = localInputsRef.current;
 
-    if (!hasLocalEdits) {
+    if (local.name === saved.name && server.name !== saved.name) {
       setName(server.name);
-      setDescription(server.description);
-      setStartupCommand(server.startupCommand);
-      setAutoRestart(server.autoRestart);
-      setPortInput(String(server.port));
-      setMemoryLimitMb(server.memoryLimitMb);
-      setCpuLimitPercent(server.cpuLimitPercent);
-      lastSavedRef.current = {
-        name: server.name,
-        description: server.description,
-        startupCommand: server.startupCommand,
-        autoRestart: server.autoRestart,
-        port: server.port,
-        memoryLimitMb: server.memoryLimitMb,
-        cpuLimitPercent: server.cpuLimitPercent,
-      };
     }
+    if (local.description === saved.description && server.description !== saved.description) {
+      setDescription(server.description);
+    }
+    if (local.startupCommand === saved.startupCommand && server.startupCommand !== saved.startupCommand) {
+      setStartupCommand(server.startupCommand);
+    }
+    if (local.autoRestart === saved.autoRestart && server.autoRestart !== saved.autoRestart) {
+      setAutoRestart(server.autoRestart);
+    }
+    if (local.portInput === String(saved.port) && server.port !== saved.port) {
+      setPortInput(String(server.port));
+    }
+    if (local.memoryLimitMb === saved.memoryLimitMb && server.memoryLimitMb !== saved.memoryLimitMb) {
+      setMemoryLimitMb(server.memoryLimitMb);
+    }
+    if (local.cpuLimitPercent === saved.cpuLimitPercent && server.cpuLimitPercent !== saved.cpuLimitPercent) {
+      setCpuLimitPercent(server.cpuLimitPercent);
+    }
+
+    lastSavedRef.current = {
+      name: server.name,
+      description: server.description,
+      startupCommand: server.startupCommand,
+      autoRestart: server.autoRestart,
+      port: server.port,
+      memoryLimitMb: server.memoryLimitMb,
+      cpuLimitPercent: server.cpuLimitPercent,
+    };
   }, [
     server.name,
     server.description,
@@ -84,13 +111,6 @@ export default function ServerSettingsTab({
     server.port,
     server.memoryLimitMb,
     server.cpuLimitPercent,
-    name,
-    description,
-    startupCommand,
-    autoRestart,
-    portInput,
-    memoryLimitMb,
-    cpuLimitPercent,
   ]);
 
   const isServerActive =
@@ -328,7 +348,7 @@ export default function ServerSettingsTab({
               />
             </div>
 
-            <div className="sm:col-span-2 grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 min-w-0">
                 <label htmlFor="srv-mem" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
                   Alokasi Memori

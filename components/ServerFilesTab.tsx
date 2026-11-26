@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  ChevronLeft,
   FileArchive,
   FileCode2,
   FilePlus2,
@@ -171,10 +170,12 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     };
     window.addEventListener('click', closeMenu);
     window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, { passive: true });
     window.addEventListener('keydown', handleKey);
     return () => {
       window.removeEventListener('click', closeMenu);
       window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu);
       window.removeEventListener('keydown', handleKey);
     };
   }, [activeMenuPath, newEntryType, moveModalPaths, renameModalPath]);
@@ -545,13 +546,10 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
     }
   }
 
-  function navigateUp() {
-    if (!currentDir) return;
-    const parts = currentDir.split('/');
-    parts.pop();
-    setSelectedPaths([]);
-    void loadDirectory(parts.join('/'));
-  }
+  const pathSegments = useMemo(
+    () => currentDir.split('/').filter(Boolean),
+    [currentDir]
+  );
 
   const hasUnsavedChanges = selectedFile !== null && fileContent !== savedContent;
 
@@ -560,20 +558,51 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       {/* File Manager Toolbar */}
       {!selectedFile && (
         <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 sm:px-3.5 sm:py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2 text-xs font-mono min-w-0 flex-1">
+          <nav
+            aria-label="Breadcrumb direktori"
+            className="flex items-center flex-wrap gap-1 text-xs font-mono min-w-0 flex-1"
+          >
             <button
               type="button"
               disabled={!currentDir}
-              onClick={navigateUp}
-              className="h-8 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+              onClick={() => {
+                setSelectedPaths([]);
+                void loadDirectory('');
+              }}
+              className={`h-7 px-2 rounded inline-flex items-center font-semibold transition-colors shrink-0 ${
+                currentDir
+                  ? 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 cursor-pointer'
+                  : 'text-zinc-900 dark:text-zinc-100 cursor-default'
+              }`}
+              title="Direktori root"
             >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span>Naik</span>
+              /
             </button>
-            <span className="text-zinc-500 dark:text-zinc-400 font-semibold truncate">
-              /{currentDir}
-            </span>
-          </div>
+            {pathSegments.map((segment, idx) => {
+              const targetPath = pathSegments.slice(0, idx + 1).join('/');
+              const isLast = idx === pathSegments.length - 1;
+              return (
+                <React.Fragment key={targetPath}>
+                  {idx > 0 && <span className="text-zinc-400 select-none">/</span>}
+                  <button
+                    type="button"
+                    disabled={isLast}
+                    onClick={() => {
+                      setSelectedPaths([]);
+                      void loadDirectory(targetPath);
+                    }}
+                    className={`h-7 px-1.5 rounded inline-flex items-center truncate max-w-[160px] sm:max-w-[220px] transition-colors ${
+                      isLast
+                        ? 'text-zinc-900 dark:text-zinc-100 font-semibold cursor-default'
+                        : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 cursor-pointer'
+                    }`}
+                  >
+                    {segment}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </nav>
 
           <input
             ref={uploadInputRef}
@@ -584,17 +613,17 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             aria-label="Upload file"
           />
 
-          <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 shrink-0">
+          <div className="grid grid-cols-3 sm:flex sm:items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={() => {
                 setNewEntryType('file');
                 setNewEntryName('');
               }}
-              className="h-8 px-2.5 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+              className="h-8 px-2 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap min-w-0 transition-colors"
             >
               <FilePlus2 className="w-3.5 h-3.5 shrink-0" />
-              <span>File Baru</span>
+              <span className="truncate">File Baru</span>
             </button>
             <button
               type="button"
@@ -602,19 +631,19 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
                 setNewEntryType('directory');
                 setNewEntryName('');
               }}
-              className="h-8 px-2.5 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+              className="h-8 px-2 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap min-w-0 transition-colors"
             >
               <FolderPlus className="w-3.5 h-3.5 shrink-0" />
-              <span>Folder Baru</span>
+              <span className="truncate">Folder Baru</span>
             </button>
             <button
               type="button"
               disabled={uploading}
               onClick={() => uploadInputRef.current?.click()}
-              className="h-8 px-2.5 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+              className="h-8 px-2 sm:px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap min-w-0 transition-colors"
             >
               <Upload className="w-3.5 h-3.5 shrink-0" />
-              <span>{uploading ? 'Upload...' : 'Upload'}</span>
+              <span className="truncate">{uploading ? 'Upload...' : 'Upload'}</span>
             </button>
           </div>
         </div>

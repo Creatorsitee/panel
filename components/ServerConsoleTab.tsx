@@ -22,14 +22,18 @@ import {
 import { apiFetch, buildAuthHeaders } from './api-client';
 import { ConsoleLinesSkeleton } from './Skeletons';
 import { tokenizeConsoleLine } from '@/lib/console-highlighter';
+import { upsertConsoleLineList } from '@/lib/console-stream';
 import { connectSseStream } from '@/lib/sse-client';
 import {
   formatNetworkAxisBytes,
   formatNetworkRateLabel,
 } from '@/lib/network-stats-utils';
 import {
+  getConsoleModeLabel,
   getConsolePowerPermissions,
+  getNextConsoleInputMode,
   getStatusDisplayLabel,
+  type ConsoleInputMode,
 } from '@/lib/console-state';
 import { showErrorToast, showInfoToast, showSuccessToast } from '@/lib/swal';
 import type {
@@ -52,7 +56,7 @@ interface MetricSample {
   tx: number;
 }
 
-function useMeasuredChartWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 420): number {
+function useMeasuredChartWidth(ref: React.RefObject<HTMLDivElement | null>, fallback = 300): number {
   const [width, setWidth] = useState(fallback);
 
   useEffect(() => {
@@ -115,8 +119,9 @@ function formatTimeLabel(date = new Date()): string {
 }
 
 function renderHighlightedLogText(text: string, defaultClass = ''): React.ReactNode {
-  if (!text) return null;
+  if (!text) return '\u00A0';
   const tokens = tokenizeConsoleLine(text, defaultClass);
+  if (tokens.length === 0) return '\u00A0';
   return (
     <>
       {tokens.map((tok, idx) =>
@@ -131,6 +136,54 @@ function renderHighlightedLogText(text: string, defaultClass = ''): React.ReactN
     </>
   );
 }
+
+const ConsoleLineRow = React.memo(function ConsoleLineRow({ line }: { line: ConsoleLine }) {
+  if (line.stream === 'system') {
+    const isCrashBanner =
+      line.text.includes('crashed state') ||
+      line.text.startsWith('Failed ') ||
+      line.text.includes('exceeded allocated memory limit');
+    return (
+      <div className="whitespace-pre-wrap break-words min-h-5">
+        <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
+        {isCrashBanner ? (
+          <span className="text-red-400 font-medium">{line.text || '\u00A0'}</span>
+        ) : (
+          renderHighlightedLogText(line.text, 'text-zinc-300')
+        )}
+      </div>
+    );
+  }
+  if (line.stream === 'stdin') {
+    return (
+      <div className="whitespace-pre-wrap break-words min-h-5 text-zinc-300">
+        <span className="select-none text-emerald-400 font-semibold mr-1.5">&gt;</span>
+        {renderHighlightedLogText(line.text.replace(/^>\s*/, ''), 'text-zinc-200')}
+      </div>
+    );
+  }
+  if (line.stream === 'stderr') {
+    if (/^\[cmnty Daemon\]:?\s*/.test(line.text)) {
+      const rest = line.text.replace(/^\[cmnty Daemon\]:?\s*/, '');
+      return (
+        <div className="whitespace-pre-wrap break-words min-h-5">
+          <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
+          <span className="text-zinc-300">{rest || '\u00A0'}</span>
+        </div>
+      );
+    }
+    return (
+      <div className="whitespace-pre-wrap break-words min-h-5">
+        {renderHighlightedLogText(line.text, 'text-zinc-200')}
+      </div>
+    );
+  }
+  return (
+    <div className="whitespace-pre-wrap break-words min-h-5">
+      {renderHighlightedLogText(line.text, 'text-zinc-200')}
+    </div>
+  );
+});
 
 function loadSavedHistory(serverId: string): string[] {
   try {
@@ -164,6 +217,7 @@ export default function ServerConsoleTab({
     },
   ]);
   const [command, setCommand] = useState('');
+  const [inputMode, setInputMode] = useState<ConsoleInputMode>('auto');
   const [commandHistory, setCommandHistory] = useState<string[]>(() =>
     typeof window !== 'undefined' ? loadSavedHistory(server.id) : []
   );
@@ -225,15 +279,10 @@ export default function ServerConsoleTab({
           });
           setLogs(unique);
           setConnectingStream(false);
-        } else if (eventName === 'log') {
+        } else if (eventName === 'log' || eventName === 'log-update') {
           const nextLine = parsed as ConsoleLine;
           setConnectingStream(false);
-          setLogs((prev) => {
-            if (!nextLine?.id || prev.some((item) => item.id === nextLine.id)) {
-              return prev;
-            }
-            return [...prev.slice(-399), nextLine];
-          });
+          setLogs((prev) => upsertConsoleLineList(prev, nextLine, 400));
         } else if (eventName === 'clear') {
           setLogs([]);
         } else if (eventName === 'metrics') {
@@ -384,22 +433,35 @@ export default function ServerConsoleTab({
   async function handleSendCommand(e: React.FormEvent) {
     e.preventDefault();
     if (!canSendInput) return;
-    if (!command.trim()) return;
+
+    const isEmptySubmit = !command.trim();
+    const canSubmitEmpty =
+      inputMode === 'stdin' ||
+      (inputMode === 'auto' &&
+        (metrics.status === 'running' ||
+          metrics.status === 'starting' ||
+          metrics.status === 'installing'));
+    if (isEmptySubmit && !canSubmitEmpty) {
+      return;
+    }
 
     const cmdToSend = command;
     setCommand('');
     draftCommandRef.current = '';
     setHistoryIndex(-1);
     setAutoScroll(true);
-    setCommandHistory((prev) => {
-      const next = [cmdToSend, ...prev.filter((item) => item !== cmdToSend)].slice(0, 50);
-      try {
-        window.localStorage.setItem(`cmnty_cmd_history_${server.id}`, JSON.stringify(next));
-      } catch {
-        // ignore storage quota errors
-      }
-      return next;
-    });
+
+    if (!isEmptySubmit) {
+      setCommandHistory((prev) => {
+        const next = [cmdToSend, ...prev.filter((item) => item !== cmdToSend)].slice(0, 50);
+        try {
+          window.localStorage.setItem(`cmnty_cmd_history_${server.id}`, JSON.stringify(next));
+        } catch {
+          // ignore storage quota errors
+        }
+        return next;
+      });
+    }
 
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
@@ -408,12 +470,12 @@ export default function ServerConsoleTab({
     try {
       await apiFetch(`/api/servers/${server.id}/console`, {
         method: 'POST',
-        body: JSON.stringify({ command: cmdToSend }),
+        body: JSON.stringify({ command: cmdToSend, mode: inputMode }),
       });
     } catch (err) {
       void showErrorToast(
         'Gagal Mengirim Perintah',
-        err instanceof Error ? err.message : 'Gagal mengirim perintah ke stdin.'
+        err instanceof Error ? err.message : 'Gagal mengirim perintah ke console.'
       );
     } finally {
       commandInputRef.current?.focus();
@@ -639,12 +701,12 @@ export default function ServerConsoleTab({
                 commandInputRef.current?.focus();
               }
             }}
-            className="h-[340px] sm:h-[420px] overflow-y-auto p-3 sm:p-4 font-mono text-[12px] leading-5 space-y-0.5 text-zinc-200 bg-[#09090B] cursor-text"
+            className="h-[340px] sm:h-[420px] overflow-y-auto overflow-x-hidden p-3 sm:p-4 font-mono text-[12px] leading-5 space-y-0.5 text-zinc-200 bg-[#09090B] cursor-text"
           >
             {connectingStream && logs.length === 0 ? (
               <ConsoleLinesSkeleton />
             ) : logs.length === 0 ? (
-              <div className="font-mono break-words text-zinc-500">
+              <div className="font-mono whitespace-pre-wrap break-words min-h-5 text-zinc-500">
                 <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
                 <span>
                   {metrics.status === 'running'
@@ -659,53 +721,7 @@ export default function ServerConsoleTab({
                 </span>
               </div>
             ) : (
-              logs.map((line) => {
-                if (line.stream === 'system') {
-                  const isCrashBanner =
-                    line.text.includes('crashed state') ||
-                    line.text.startsWith('Failed ') ||
-                    line.text.includes('exceeded allocated memory limit');
-                  return (
-                    <div key={line.id} className="break-words">
-                      <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
-                      {isCrashBanner ? (
-                        <span className="text-red-400 font-medium">{line.text}</span>
-                      ) : (
-                        renderHighlightedLogText(line.text, 'text-zinc-300')
-                      )}
-                    </div>
-                  );
-                }
-                if (line.stream === 'stdin') {
-                  return (
-                    <div key={line.id} className="break-words text-zinc-300">
-                      <span className="select-none text-emerald-400 font-semibold mr-1.5">&gt;</span>
-                      {renderHighlightedLogText(line.text.replace(/^>\s*/, ''), 'text-zinc-200')}
-                    </div>
-                  );
-                }
-                if (line.stream === 'stderr') {
-                  if (/^\[cmnty Daemon\]:?\s*/.test(line.text)) {
-                    const rest = line.text.replace(/^\[cmnty Daemon\]:?\s*/, '');
-                    return (
-                      <div key={line.id} className="break-words">
-                        <span className="text-amber-400/90 select-none font-medium">[cmnty Daemon]: </span>
-                        <span className="text-zinc-300">{rest}</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={line.id} className="break-words">
-                      {renderHighlightedLogText(line.text, 'text-zinc-200')}
-                    </div>
-                  );
-                }
-                return (
-                  <div key={line.id} className="break-words">
-                    {renderHighlightedLogText(line.text, 'text-zinc-200')}
-                  </div>
-                );
-              })
+              logs.map((line) => <ConsoleLineRow key={line.id} line={line} />)
             )}
           </div>
 
@@ -758,9 +774,34 @@ export default function ServerConsoleTab({
               draftCommandRef.current = e.target.value;
             }}
             onKeyDown={handleCommandKeyDown}
-            placeholder="Input a command..."
+            placeholder={
+              inputMode === 'shell'
+                ? 'Run container command (ls, npm i, pip list, start)...'
+                : inputMode === 'stdin'
+                ? 'Send directly to process stdin...'
+                : 'Input a command...'
+            }
             className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:cursor-not-allowed"
           />
+          <button
+            type="button"
+            disabled={!canSendInput}
+            onClick={(e) => {
+              e.stopPropagation();
+              setInputMode((prev) => getNextConsoleInputMode(prev));
+              commandInputRef.current?.focus();
+            }}
+            title={
+              inputMode === 'auto'
+                ? 'Mode Auto: kirim ke stdin saat proses meminta input, atau jalankan perintah container'
+                : inputMode === 'shell'
+                ? 'Mode Shell: jalankan perintah di direktori server (npm, pip, ls, dll.)'
+                : 'Mode Stdin: kirim input langsung ke stdin proses aktif'
+            }
+            className="shrink-0 h-6 px-2 rounded border border-zinc-800 bg-zinc-900/70 hover:bg-zinc-800 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {getConsoleModeLabel(inputMode)}
+          </button>
         </form>
       </div>
 
@@ -931,7 +972,7 @@ export default function ServerConsoleTab({
 
           {/* Real-Time Network Chart Card (Inbound / Outbound) */}
           <div className="bg-zinc-50 dark:bg-zinc-900/55 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 sm:p-4 flex flex-col gap-2 min-w-0 md:col-span-2 lg:col-span-1">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
                 Network
               </h3>
