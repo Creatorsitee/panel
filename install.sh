@@ -97,8 +97,40 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
 
+detect_public_ip() {
+  local ip=""
+  local endpoint
+  for endpoint in \
+    "https://api.ipify.org" \
+    "https://ifconfig.me/ip" \
+    "https://icanhazip.com" \
+    "https://checkip.amazonaws.com"; do
+    ip="$(curl -4 -fsSL --connect-timeout 3 --max-time 5 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      echo "$ip"
+      return 0
+    fi
+  done
+
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' || true)"
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      echo "$ip"
+      return 0
+    fi
+  fi
+
+  ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | head -n1 || true)"
+  if [ -n "$ip" ]; then
+    echo "$ip"
+    return 0
+  fi
+
+  echo "127.0.0.1"
+}
+
 echo "==> [6/6] Selesai!"
-PUBLIC_IP="$(hostname -I | awk '{print $1}')"
+PUBLIC_IP="$(detect_public_ip)"
 echo "---------------------------------------------------------"
 echo "cmnty aktif di      : http://${PUBLIC_IP}:${APP_PORT}"
 echo "Status layanan      : systemctl status ${SERVICE_NAME}"
