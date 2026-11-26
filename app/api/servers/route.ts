@@ -5,8 +5,8 @@ import {
   listAllServers,
   listServersForUser,
 } from '@/lib/db';
-import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
-import { requireAuth } from '@/lib/route-guard';
+import { getHostInfo, getServerMetrics } from '@/lib/processes';
+import { requireAuth } from '@/lib/guards';
 import {
   allocateNextPort,
   parseSafeStartupCommand,
@@ -20,7 +20,7 @@ import {
   getEffectiveMinMemoryMb,
   getPerServerMaxCpuPercent,
   getPerServerMaxMemoryMb,
-} from '@/lib/vps-specs';
+} from '@/lib/resource-limits';
 import type { ServerRuntime, ServerWithMetrics } from '@/lib/types';
 
 export async function GET(req: NextRequest) {

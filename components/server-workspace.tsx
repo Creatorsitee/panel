@@ -3,12 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
-import { apiFetch } from './api-client';
-import { usePanel, type ServerTab } from './PanelContext';
-import ServerConsoleTab from './ServerConsoleTab';
-import ServerFilesTab from './ServerFilesTab';
-import ServerSettingsTab from './ServerSettingsTab';
-import { ServerWorkspaceSkeleton } from './Skeletons';
+import { apiFetch } from '@/lib/api';
+import { usePanel, type ServerTab } from './panel-shell';
+import ServerConsoleTab from './server-console';
+import ServerFilesTab from './server-files';
+import ServerSettingsTab from './server-settings';
+import { ServerWorkspaceSkeleton } from './skeletons';
 import type { ServerWithMetrics } from '@/lib/types';
 
 interface ServerWorkspaceViewProps {

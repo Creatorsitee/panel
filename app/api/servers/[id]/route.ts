@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteServerRecord, getUserById, listAllServers, updateServerRecord } from '@/lib/db';
-import { updateServerDotEnvPort } from '@/lib/file-manager';
-import { getHostInfo, getServerMetrics, stopServerProcess } from '@/lib/process-manager';
-import { requireServerAccess } from '@/lib/route-guard';
+import { updateServerDotEnvPort } from '@/lib/files';
+import { getHostInfo, getServerMetrics, stopServerProcess } from '@/lib/processes';
+import { requireServerAccess } from '@/lib/guards';
 import {
   parseSafeStartupCommand,
   validateServerName,
@@ -15,7 +15,7 @@ import {
   getEffectiveMinMemoryMb,
   getPerServerMaxCpuPercent,
   getPerServerMaxMemoryMb,
-} from '@/lib/vps-specs';
+} from '@/lib/resource-limits';
 
 export async function GET(
   req: NextRequest,

@@ -19,23 +19,20 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { apiFetch, buildAuthHeaders } from './api-client';
-import { ConsoleLinesSkeleton } from './Skeletons';
-import { tokenizeConsoleLine } from '@/lib/console-highlighter';
+import { apiFetch, buildAuthHeaders } from '@/lib/api';
+import { ConsoleLinesSkeleton } from './skeletons';
+import { tokenizeConsoleLine } from '@/lib/console-highlight';
 import { upsertConsoleLineList } from '@/lib/console-stream';
-import { connectSseStream } from '@/lib/sse-client';
+import { connectSseStream } from '@/lib/sse';
 import {
   formatNetworkAxisBytes,
   formatNetworkRateLabel,
-} from '@/lib/network-stats-utils';
+} from '@/lib/network-stats';
 import {
-  getConsoleModeLabel,
   getConsolePowerPermissions,
-  getNextConsoleInputMode,
   getStatusDisplayLabel,
-  type ConsoleInputMode,
 } from '@/lib/console-state';
-import { showErrorToast, showInfoToast, showSuccessToast } from '@/lib/swal';
+import { showErrorToast, showInfoToast, showSuccessToast } from '@/lib/alerts';
 import type {
   ConsoleLine,
   ServerRuntimeMetrics,
@@ -217,7 +214,6 @@ export default function ServerConsoleTab({
     },
   ]);
   const [command, setCommand] = useState('');
-  const [inputMode, setInputMode] = useState<ConsoleInputMode>('auto');
   const [commandHistory, setCommandHistory] = useState<string[]>(() =>
     typeof window !== 'undefined' ? loadSavedHistory(server.id) : []
   );
@@ -328,7 +324,7 @@ export default function ServerConsoleTab({
     }
   }, [logs, autoScroll]);
 
-  const powerPerms = getConsolePowerPermissions(metrics.status);
+  const powerPerms = getConsolePowerPermissions(metrics.status, Boolean(metrics.awaitingInput));
   const statusDisplayLabel = getStatusDisplayLabel(metrics.status);
   const canSendInput = powerPerms.canSendInput;
 
@@ -382,6 +378,7 @@ export default function ServerConsoleTab({
         uptimeSeconds: 0,
         networkRxBytesPerSec: 0,
         networkTxBytesPerSec: 0,
+        awaitingInput: false,
       };
       setStreamMetrics(optimisticStarting);
       appendMetricSample(optimisticStarting);
@@ -435,16 +432,6 @@ export default function ServerConsoleTab({
     if (!canSendInput) return;
 
     const isEmptySubmit = !command.trim();
-    const canSubmitEmpty =
-      inputMode === 'stdin' ||
-      (inputMode === 'auto' &&
-        (metrics.status === 'running' ||
-          metrics.status === 'starting' ||
-          metrics.status === 'installing'));
-    if (isEmptySubmit && !canSubmitEmpty) {
-      return;
-    }
-
     const cmdToSend = command;
     setCommand('');
     draftCommandRef.current = '';
@@ -470,7 +457,7 @@ export default function ServerConsoleTab({
     try {
       await apiFetch(`/api/servers/${server.id}/console`, {
         method: 'POST',
-        body: JSON.stringify({ command: cmdToSend, mode: inputMode }),
+        body: JSON.stringify({ command: cmdToSend }),
       });
     } catch (err) {
       void showErrorToast(
@@ -738,7 +725,7 @@ export default function ServerConsoleTab({
           )}
         </div>
 
-        {/* Pterodactyl-style Integrated Terminal Command Input */}
+        {/* Integrated Terminal Command Input */}
         <form
           onSubmit={handleSendCommand}
           onClick={() => {
@@ -774,34 +761,9 @@ export default function ServerConsoleTab({
               draftCommandRef.current = e.target.value;
             }}
             onKeyDown={handleCommandKeyDown}
-            placeholder={
-              inputMode === 'shell'
-                ? 'Run container command (ls, npm i, pip list, start)...'
-                : inputMode === 'stdin'
-                ? 'Send directly to process stdin...'
-                : 'Input a command...'
-            }
+            placeholder="Input a command..."
             className="flex-1 min-w-0 bg-transparent text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:cursor-not-allowed"
           />
-          <button
-            type="button"
-            disabled={!canSendInput}
-            onClick={(e) => {
-              e.stopPropagation();
-              setInputMode((prev) => getNextConsoleInputMode(prev));
-              commandInputRef.current?.focus();
-            }}
-            title={
-              inputMode === 'auto'
-                ? 'Mode Auto: kirim ke stdin saat proses meminta input, atau jalankan perintah container'
-                : inputMode === 'shell'
-                ? 'Mode Shell: jalankan perintah di direktori server (npm, pip, ls, dll.)'
-                : 'Mode Stdin: kirim input langsung ke stdin proses aktif'
-            }
-            className="shrink-0 h-6 px-2 rounded border border-zinc-800 bg-zinc-900/70 hover:bg-zinc-800 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {getConsoleModeLabel(inputMode)}
-          </button>
         </form>
       </div>
 

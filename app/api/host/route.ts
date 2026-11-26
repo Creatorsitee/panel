@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getHostInfo } from '@/lib/process-manager';
-import { requireAuth } from '@/lib/route-guard';
+import { getHostInfo } from '@/lib/processes';
+import { requireAuth } from '@/lib/guards';
 
 export const dynamic = 'force-dynamic';
 

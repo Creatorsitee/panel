@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hashPassword, toPublicUser } from '@/lib/auth';
 import { createUserByAdmin, listAllServers, listAllUsers } from '@/lib/db';
-import { requireAdmin } from '@/lib/route-guard';
+import { requireAdmin } from '@/lib/guards';
 import { validateEmail } from '@/lib/security';
 import type { AdminUserSummary, UserRole } from '@/lib/types';
 

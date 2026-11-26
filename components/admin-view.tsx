@@ -2,8 +2,8 @@
 
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import AdminPanelTab from './AdminPanelTab';
-import { usePanel } from './PanelContext';
+import AdminPanelTab from './admin-panel';
+import { usePanel } from './panel-shell';
 
 interface AdminRouteViewProps {
   section?: 'users' | 'servers';

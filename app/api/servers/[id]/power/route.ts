@@ -4,8 +4,8 @@ import {
   restartServerProcess,
   startServerProcess,
   stopServerProcess,
-} from '@/lib/process-manager';
-import { requireServerAccess } from '@/lib/route-guard';
+} from '@/lib/processes';
+import { requireServerAccess } from '@/lib/guards';
 
 export async function POST(
   req: NextRequest,

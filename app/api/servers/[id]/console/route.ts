@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeConsoleInputMode } from '@/lib/console-state';
 import {
   clearConsoleHistory,
   getConsoleHistory,
   getServerMetrics,
   sendCommandToServer,
   subscribeConsole,
-} from '@/lib/process-manager';
-import { requireServerAccess } from '@/lib/route-guard';
+} from '@/lib/processes';
+import { requireServerAccess } from '@/lib/guards';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,7 +116,6 @@ export async function POST(
   try {
     const body = (await req.json()) as {
       command?: string;
-      mode?: string;
       action?: 'clear';
     };
     if (body.action === 'clear') {
@@ -130,8 +128,7 @@ export async function POST(
     }
 
     const command = typeof body.command === 'string' ? body.command : String(body.command);
-    const mode = normalizeConsoleInputMode(body.mode);
-    const result = await sendCommandToServer(id, command, mode);
+    const result = await sendCommandToServer(id, command);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Gagal mengirim perintah.';

@@ -14,18 +14,17 @@ import {
   Save,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
-import { apiFetch } from './api-client';
-import { usePanel } from './PanelContext';
-import { FileEditorSkeleton, FileManagerSkeleton } from './Skeletons';
-import { isEditableTextFile } from '@/lib/file-utils';
+import { apiFetch } from '@/lib/api';
+import { usePanel } from './panel-shell';
+import { FileEditorSkeleton, FileManagerSkeleton } from './skeletons';
+import { isEditableTextFile } from '@/lib/file-types';
 import {
   showConfirmDialog,
   showErrorAlert,
   showSuccessToast,
   showWarningAlert,
-} from '@/lib/swal';
+} from '@/lib/alerts';
 import type { FileEntry } from '@/lib/types';
 
 interface ServerFilesTabProps {
@@ -244,6 +243,9 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       });
       setSavedContent(fileContent);
       void showSuccessToast('File disimpan', selectedFile);
+      setSelectedFile(null);
+      setFileContent('');
+      setSavedContent('');
       void loadDirectory(currentDir, { silent: true });
     } catch (err) {
       await showErrorAlert(
@@ -652,33 +654,41 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
       {newEntryType && (
         <form
           onSubmit={handleCreateEntry}
-          className="p-3 rounded bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 flex flex-wrap items-center gap-2"
+          className="p-3 rounded bg-zinc-50 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700"
         >
-          <span className="text-xs font-medium">
-            {newEntryType === 'file' ? 'Nama file:' : 'Nama folder:'}
-          </span>
-          <input
-            type="text"
-            required
-            autoFocus
-            value={newEntryName}
-            onChange={(e) => setNewEntryName(e.target.value)}
-            placeholder={newEntryType === 'file' ? 'app.js' : 'src'}
-            className="flex-1 min-w-[180px] h-8 px-2.5 rounded bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-xs font-mono focus:outline-none focus:border-zinc-500"
-          />
-          <button
-            type="submit"
-            className="h-8 px-3 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-medium cursor-pointer"
-          >
-            Buat
-          </button>
-          <button
-            type="button"
-            onClick={() => setNewEntryType(null)}
-            className="h-8 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 text-xs cursor-pointer"
-          >
-            Batal
-          </button>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="new-entry-name-input"
+              className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            >
+              {newEntryType === 'file' ? 'Nama file:' : 'Nama folder:'}
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                id="new-entry-name-input"
+                type="text"
+                required
+                autoFocus
+                value={newEntryName}
+                onChange={(e) => setNewEntryName(e.target.value)}
+                placeholder={newEntryType === 'file' ? 'app.js' : 'src'}
+                className="flex-1 min-w-[180px] h-8 px-2.5 rounded bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-xs font-mono focus:outline-none focus:border-zinc-500"
+              />
+              <button
+                type="submit"
+                className="h-8 px-3 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-medium cursor-pointer"
+              >
+                Buat
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewEntryType(null)}
+                className="h-8 px-2.5 rounded border border-zinc-300 dark:border-zinc-700 text-xs cursor-pointer"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
         </form>
       )}
 
@@ -1086,16 +1096,6 @@ export default function ServerFilesTab({ serverId }: ServerFilesTabProps) {
             >
               <Trash2 className="w-3.5 h-3.5 shrink-0" />
               <span>Delete</span>
-            </button>
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => setSelectedPaths([])}
-              aria-label="Batalkan pilihan"
-              title="Batalkan pilihan"
-              className="h-8 w-8 rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center justify-center cursor-pointer transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

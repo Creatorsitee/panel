@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listAllServers, listAllUsers } from '@/lib/db';
-import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
-import { requireAdmin } from '@/lib/route-guard';
+import { getHostInfo, getServerMetrics } from '@/lib/processes';
+import { requireAdmin } from '@/lib/guards';
 import type { AdminServerSummary } from '@/lib/types';
 
 export async function GET(req: NextRequest) {

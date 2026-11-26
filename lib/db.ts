@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { emitWorkspaceChanged } from './realtime-bus';
+import { hashPassword, verifyPassword } from './auth';
+import { emitWorkspaceChanged } from './events';
 import type { ServerConfig, UserRecord, UserRole } from './types';
 
 interface DatabaseState {
@@ -17,7 +18,79 @@ export const SERVERS_ROOT = path.join(DATA_ROOT, 'servers');
 
 const globalForDb = globalThis as unknown as {
   __nodalDbLock?: Promise<void>;
+  __cmntyEnvAdminSig?: string;
 };
+
+function readEnvAdminConfig(): { name: string; email: string; password: string } | null {
+  const email = (process.env.ADMIN_EMAIL ?? process.env.admin_email ?? '').trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD ?? process.env.admin_password ?? '';
+  const rawName = (process.env.ADMIN_USER ?? process.env.admin_user ?? '').trim();
+
+  if (!email || !password) {
+    return null;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return null;
+  }
+  if (password.length < 6 || password.length > 128) {
+    return null;
+  }
+  const name = rawName.length >= 2 && rawName.length <= 60 ? rawName : 'Admin';
+  return { name, email, password };
+}
+
+function syncEnvAdminOnState(state: DatabaseState): void {
+  const cfg = readEnvAdminConfig();
+  if (!cfg) {
+    globalForDb.__cmntyEnvAdminSig = undefined;
+    return;
+  }
+
+  const sig = crypto
+    .createHash('sha256')
+    .update(`${DATA_ROOT}|${cfg.name}|${cfg.email}|${cfg.password}`)
+    .digest('hex');
+
+  const existingIdx = state.users.findIndex(
+    (u) => u.email.toLowerCase() === cfg.email
+  );
+
+  if (globalForDb.__cmntyEnvAdminSig === sig && existingIdx !== -1) {
+    return;
+  }
+
+  let dirty = false;
+  if (existingIdx === -1) {
+    state.users.push({
+      id: `usr_${crypto.randomBytes(6).toString('hex')}`,
+      name: cfg.name,
+      email: cfg.email,
+      passwordHash: hashPassword(cfg.password),
+      role: 'admin',
+      createdAt: new Date().toISOString(),
+    });
+    dirty = true;
+  } else {
+    const existing = state.users[existingIdx];
+    const needsRole = existing.role !== 'admin';
+    const needsName = existing.name !== cfg.name;
+    const needsPassword = !verifyPassword(cfg.password, existing.passwordHash);
+    if (needsRole || needsName || needsPassword) {
+      state.users[existingIdx] = {
+        ...existing,
+        name: cfg.name,
+        role: 'admin',
+        passwordHash: needsPassword ? hashPassword(cfg.password) : existing.passwordHash,
+      };
+      dirty = true;
+    }
+  }
+
+  if (dirty) {
+    writeDbSync(state);
+  }
+  globalForDb.__cmntyEnvAdminSig = sig;
+}
 
 function ensureDirs(): void {
   if (!fs.existsSync(DATA_ROOT)) {
@@ -31,20 +104,25 @@ function ensureDirs(): void {
 function readDbSync(): DatabaseState {
   ensureDirs();
   if (!fs.existsSync(DB_PATH)) {
-    const empty: DatabaseState = { users: [], servers: [] };
-    fs.writeFileSync(DB_PATH, JSON.stringify(empty, null, 2), 'utf8');
-    return empty;
+    const initial: DatabaseState = { users: [], servers: [] };
+    writeDbSync(initial);
+    syncEnvAdminOnState(initial);
+    return initial;
   }
 
   try {
     const raw = fs.readFileSync(DB_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DatabaseState>;
-    return {
+    const state: DatabaseState = {
       users: Array.isArray(parsed.users) ? parsed.users : [],
       servers: Array.isArray(parsed.servers) ? parsed.servers : [],
     };
+    syncEnvAdminOnState(state);
+    return state;
   } catch {
-    return { users: [], servers: [] };
+    const fallback: DatabaseState = { users: [], servers: [] };
+    syncEnvAdminOnState(fallback);
+    return fallback;
   }
 }
 

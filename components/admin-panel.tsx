@@ -18,10 +18,10 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { apiFetch, buildAuthHeaders } from './api-client';
-import CreateServerModal from './CreateServerModal';
-import { AdminTableSkeleton, ShimmerBlock } from './Skeletons';
-import { connectSseStream } from '@/lib/sse-client';
+import { apiFetch, buildAuthHeaders } from '@/lib/api';
+import CreateServerModal from './create-server-modal';
+import { AdminTableSkeleton, ShimmerBlock } from './skeletons';
+import { connectSseStream } from '@/lib/sse';
 import {
   computeAdminOverview,
   filterAdminServers,
@@ -29,14 +29,14 @@ import {
   getAdminUserDeleteBlockReason,
   isBusyServerStatus,
   type AdminStatusFilter,
-} from '@/lib/admin-utils';
+} from '@/lib/admin';
 import {
   showConfirmDialog,
   showErrorAlert,
   showErrorToast,
   showInfoToast,
   showSuccessToast,
-} from '@/lib/swal';
+} from '@/lib/alerts';
 import type {
   AdminServerSummary,
   AdminUserSummary,

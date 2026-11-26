@@ -7,8 +7,8 @@ import {
   listAllServers,
   updateUserRecord,
 } from '@/lib/db';
-import { stopServerProcess } from '@/lib/process-manager';
-import { requireAdmin } from '@/lib/route-guard';
+import { stopServerProcess } from '@/lib/processes';
+import { requireAdmin } from '@/lib/guards';
 import { validateEmail } from '@/lib/security';
 import type { AdminUserSummary, UserRole } from '@/lib/types';
 

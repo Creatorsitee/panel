@@ -28,12 +28,12 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { ApiError, apiFetch, buildAuthHeaders, setAuthToken } from './api-client';
-import CreateServerModal from './CreateServerModal';
-import { WorkspaceBootSkeleton } from './Skeletons';
-import { connectSseStream } from '@/lib/sse-client';
+import { ApiError, apiFetch, buildAuthHeaders, setAuthToken } from '@/lib/api';
+import CreateServerModal from './create-server-modal';
+import { WorkspaceBootSkeleton } from './skeletons';
+import { connectSseStream } from '@/lib/sse';
 import { saveThemeMode, useThemeMode } from '@/lib/theme';
-import { showInfoToast } from '@/lib/swal';
+import { showInfoToast } from '@/lib/alerts';
 import type {
   HostInfo,
   PublicUser,

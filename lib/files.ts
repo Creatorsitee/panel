@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { getServerDirectory } from './db';
-import { isEditableTextFile } from './file-utils';
+import { isEditableTextFile } from './file-types';
 import { parseDotEnvContent, resolveSafePath } from './security';
 import type { FileEntry } from './types';
 

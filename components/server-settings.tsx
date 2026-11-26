@@ -2,12 +2,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2, Terminal, ShieldAlert } from 'lucide-react';
-import { apiFetch } from './api-client';
-import { showConfirmDialog, showErrorAlert } from '@/lib/swal';
+import { apiFetch } from '@/lib/api';
+import { showConfirmDialog, showErrorAlert } from '@/lib/alerts';
 import {
   getHostCpuOptions,
   getHostMemoryOptions,
-} from '@/lib/vps-specs';
+} from '@/lib/resource-limits';
 import type { HostInfo, ServerWithMetrics } from '@/lib/types';
 
 interface ServerSettingsTabProps {

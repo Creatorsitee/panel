@@ -3,9 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { apiFetch, setAuthToken } from './api-client';
+import { apiFetch, setAuthToken } from '@/lib/api';
 import { useThemeMode } from '@/lib/theme';
-import { showErrorAlert, showSuccessToast } from '@/lib/swal';
+import { showErrorAlert, showSuccessToast } from '@/lib/alerts';
 import type { PublicUser } from '@/lib/types';
 
 interface AuthScreenProps {

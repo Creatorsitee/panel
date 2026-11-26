@@ -52,6 +52,7 @@ export interface ServerRuntimeMetrics {
   uptimeSeconds: number;
   exitCode: number | null;
   startedAt: string | null;
+  awaitingInput: boolean;
 }
 
 export interface ServerWithMetrics extends ServerConfig {

@@ -6,8 +6,8 @@ import {
   Plus,
   Search,
 } from 'lucide-react';
-import { usePanel } from './PanelContext';
-import { DashboardContentSkeleton } from './Skeletons';
+import { usePanel } from './panel-shell';
+import { DashboardContentSkeleton } from './skeletons';
 import { getStatusDisplayLabel } from '@/lib/console-state';
 
 export default function ServersDashboardView() {

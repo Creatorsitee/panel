@@ -6,9 +6,9 @@ import {
   listAllUsers,
   listServersForUser,
 } from '@/lib/db';
-import { getHostInfo, getServerMetrics } from '@/lib/process-manager';
-import { subscribeFilesChanged, subscribeWorkspaceEvents } from '@/lib/realtime-bus';
-import { requireAuth } from '@/lib/route-guard';
+import { getHostInfo, getServerMetrics } from '@/lib/processes';
+import { subscribeFilesChanged, subscribeWorkspaceEvents } from '@/lib/events';
+import { requireAuth } from '@/lib/guards';
 import type {
   AdminServerSummary,
   AdminUserSummary,

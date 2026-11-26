@@ -9,8 +9,8 @@ import {
   Server,
   Terminal,
 } from 'lucide-react';
-import { usePanel } from './PanelContext';
-import { HostStatsSkeleton } from './Skeletons';
+import { usePanel } from './panel-shell';
+import { HostStatsSkeleton } from './skeletons';
 
 function formatHostUptime(totalSec: number): string {
   if (totalSec <= 0) return '0m';

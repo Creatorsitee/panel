@@ -11,7 +11,7 @@
 ![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?style=flat-square&logo=nodedotjs)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python)
 
-[Features](#key-features) • [Screenshots](#screenshots) • [Console & Command Modes](#console--command-modes) • [Deployment](#deployment) • [Environment Variables](#environment-variables) • [Architecture](#project-structure)
+[Features](#key-features) • [Screenshots](#screenshots) • [Interactive Console](#interactive-console) • [Deployment](#deployment) • [Environment Variables](#environment-variables) • [Architecture](#project-structure)
 
 <br />
 
@@ -24,10 +24,10 @@
 ## Key Features
 
 - **Multi-Runtime Process Supervision** — Run and manage **Node.js** (`node`, `npm`, `npx`, `tsx`, `ts-node`, `nodemon`) and **Python** (`python3`, `python`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `celery`, `hypercorn`, `streamlit`, `pytest`) instances with automatic dependency installation (`package.json` / `requirements.txt`).
-- **Real-Time Streaming Console** — Powered by Server-Sent Events (SSE) with zero-delay partial line flushing, carriage return (`\r`) progress overwrite, ANSI color highlighting, command history (`ArrowUp` / `ArrowDown`), and smart Pterodactyl-style command routing (`Auto`, `Shell`, and `Stdin` modes).
+- **Real-Time Streaming Console** — Powered by Server-Sent Events (SSE) with zero-delay partial line flushing, carriage return (`\r`) progress overwrite, ANSI color highlighting, command history (`ArrowUp` / `ArrowDown`), and interactive `stdin` forwarding when a running process requests input.
 - **Live Resource Telemetry & Quotas** — Monitor per-server CPU load, RSS memory (with OOM auto-termination), uptime, and inbound/outbound network rates alongside host-level CPU, RAM, Swap, Disk, and runtime versions.
 - **Integrated File Manager** — Browse directories with clickable breadcrumbs, edit text/code files inline, upload files, extract `.zip` archives safely, and manage server-scoped `.env` variables.
-- **Role-Based Access Control (RBAC)** — First registered account is promoted to `admin` automatically; admins can manage users, transfer server ownership, enforce RAM/CPU limits, and inspect all instances.
+- **Role-Based Access Control (RBAC)** — First registered account is promoted to `admin` automatically (or optionally configured via `ADMIN_USER`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD`); admins can manage users, transfer server ownership, enforce RAM/CPU limits, and inspect all instances.
 - **Sandboxed Execution** — Strict directory confinement (`resolveSafePath` + symlink realpath checks), `shell: false` process spawning, isolated server environment variables, and `scrypt` + HMAC-SHA256 session security.
 
 ---
@@ -39,7 +39,7 @@
 | Servers Dashboard | Real-Time Console & Telemetry |
 | :---: | :---: |
 | <img src="docs/screenshots/dashboard.png" alt="Servers Dashboard" width="100%" /> | <img src="docs/screenshots/console.png" alt="Server Console" width="100%" /> |
-| Filter instances by runtime (`Node.js` / `Python`), search by name or port, and track live status & resource usage. | Power controls (`Start`, `Restart`, `Stop`, `Kill`), live ANSI log streaming, command bar (`Auto`/`Shell`/`Stdin`), and CPU/Memory/Network charts. |
+| Filter instances by runtime (`Node.js` / `Python`), search by name or port, and track live status & resource usage. | Power controls (`Start`, `Restart`, `Stop`, `Kill`), live ANSI log streaming, interactive `stdin` bar, and CPU/Memory/Network charts. |
 
 ### File Manager & Host Resources
 
@@ -57,27 +57,13 @@
 
 ---
 
-## Console & Command Modes
+## Interactive Console
 
-The console input bar supports three modes (switchable via the mode button on the right side of the command bar) so both interactive CLI apps and non-interactive web servers/bots work seamlessly:
+The console command bar (`Input a command...`) is context-aware and activates **only when the running process actively requests standard input (`stdin`)**:
 
-| Mode | Behavior | Best For |
-| :--- | :--- | :--- |
-| **`Auto`** *(default)* | Sends input to `stdin` when the running process actively listens for input (`readline`, `input()`, `fs.readSync(0)`, `sys.stdin`) or during dependency installation; otherwise executes container shell & panel commands inside the server directory. | General Node.js & Python apps, bots, and web servers |
-| **`Shell`** | Executes sandboxed container commands directly inside `/home/container` (`npm`, `pip`, `node`, `python3`, file utilities, and `start`/`stop`/`restart`/`kill`/`clear`), even while an app is running. | Installing packages or inspecting files without stopping the server |
-| **`Stdin`** | Forwards every submission (including bare `Enter`) directly to the active process's `stdin`. | Interactive prompts or custom CLI binaries |
-
-> **Tip:** While in `Auto` mode on an interactive process, prefix any command with `!` (for example `!ls -la` or `!npm install axios`) to run it immediately in the container shell.
-
-<details>
-<summary>Supported Built-in Container & Panel Commands</summary>
-
-- **Power & Console:** `start`, `stop`, `restart`, `kill`, `clear`, `cls`, `help`
-- **Navigation & Inspection:** `pwd`, `cd [dir]`, `ls [-la] [dir]`, `ll`, `dir`, `cat <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `env`, `which <bin>`, `whoami`, `uname`
-- **File Operations:** `mkdir [-p] <dir>`, `touch <file>`, `rm [-rf] <path>`, `mv <src> <dst>`, `cp [-r] <src> <dst>`, `echo <text>`
-- **Runtimes & Packages:** `npm`, `npx`, `node`, `tsx`, `ts-node`, `nodemon`, `python3`, `python`, `pip`, `pip3`, `uvicorn`, `gunicorn`, `flask`, `fastapi`, `pytest` (supports `&&` command chaining)
-
-</details>
+- **Interactive Input Detection:** Built-in runtime hooks automatically detect when a Node.js (`readline`, `process.stdin`, `fs.readSync(0)`) or Python (`input()`, `sys.stdin`, `os.read(0)`) process waits for user input, enabling the input bar in real time via SSE.
+- **Disabled When Idle or Non-Interactive:** When a server is offline, stopping, or running a background HTTP/bot loop that does not read from `stdin`, the command input remains safely locked.
+- **Command History:** Use `ArrowUp` and `ArrowDown` to recall previously sent `stdin` lines during interactive prompts.
 
 ---
 
@@ -156,6 +142,9 @@ See [`.env.example`](.env.example) for the starter template:
 | :--- | :---: | :--- | :--- |
 | `PANEL_SESSION_SECRET` | Recommended | Auto-generated in `<DATA_DIR>/.session-secret` | Secret key (`>= 16` chars) used to sign HMAC-SHA256 session tokens. |
 | `PANEL_DATA_DIR` | Optional | `./data` | Custom directory path for `panel-db.json` and per-server workspaces. |
+| `ADMIN_USER` | Optional | `Admin` | Display name for an optional pre-configured administrator account (requires `ADMIN_EMAIL` and `ADMIN_PASSWORD`). |
+| `ADMIN_EMAIL` | Optional | — | Email address for the optional environment-configured administrator account. |
+| `ADMIN_PASSWORD` | Optional | — | Password (6–128 chars) for the optional environment-configured administrator account. |
 | `APP_URL` | Optional | `RAILWAY_PUBLIC_DOMAIN` or `http://localhost:3000` | Public origin URL used for metadata, `robots.txt`, and `sitemap.xml`. |
 | `PORT` | Optional | `3000` | HTTP port bound by the Next.js server. |
 | `NODE_ENV` | Production | `production` | Runtime mode (`production` for deployments). |
@@ -184,11 +173,11 @@ See [`.env.example`](.env.example) for the starter template:
 ├── docs/screenshots/         # Web UI screenshots used in documentation
 ├── lib/
 │   ├── auth.ts               # scrypt password hashing & HMAC-SHA256 token verification
-│   ├── console-state.ts      # Power button permissions & console input mode state
+│   ├── console-state.ts      # Power button & stdin input availability helpers
 │   ├── console-stream.ts     # Partial-line & carriage-return SSE stream parser
-│   ├── db.ts                 # Atomic JSON database & server workspace directory helper
-│   ├── file-manager.ts       # Sandboxed file CRUD, ZIP extraction, and .env handling
-│   ├── process-manager.ts    # Child process lifecycle, metrics, and container shell execution
+│   ├── db.ts                 # Atomic JSON database, optional env admin sync & workspaces
+│   ├── files.ts              # Sandboxed file CRUD, ZIP extraction, and .env handling
+│   ├── processes.ts          # Child process lifecycle, metrics, and stdin hooks
 │   └── security.ts           # Path traversal guards & runtime command validators
 ├── Dockerfile                # Production image for Railway & Docker deployments
 ├── install.sh                # Automated Ubuntu/Debian systemd installer

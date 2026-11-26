@@ -2,14 +2,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { apiFetch } from './api-client';
-import { showErrorAlert, showSuccessToast, showWarningAlert } from '@/lib/swal';
+import { apiFetch } from '@/lib/api';
+import { showErrorAlert, showSuccessToast, showWarningAlert } from '@/lib/alerts';
 import {
   getDefaultCpuPercent,
   getDefaultMemoryMb,
   getHostCpuOptions,
   getHostMemoryOptions,
-} from '@/lib/vps-specs';
+} from '@/lib/resource-limits';
 import type {
   AdminUserSummary,
   HostInfo,

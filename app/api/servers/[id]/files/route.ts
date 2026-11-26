@@ -9,9 +9,9 @@ import {
   readServerFile,
   renameServerEntry,
   writeServerFile,
-} from '@/lib/file-manager';
-import { emitFilesChanged } from '@/lib/realtime-bus';
-import { requireServerAccess } from '@/lib/route-guard';
+} from '@/lib/files';
+import { emitFilesChanged } from '@/lib/events';
+import { requireServerAccess } from '@/lib/guards';
 
 export async function GET(
   req: NextRequest,

@@ -1,4 +1,4 @@
-import ServerWorkspaceView from '@/components/ServerWorkspaceView';
+import ServerWorkspaceView from '@/components/server-workspace';
 
 export default async function ServerFilesPage({
   params,
